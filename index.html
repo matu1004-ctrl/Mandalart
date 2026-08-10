@@ -219,8 +219,9 @@
   <div class="menuWrap">
     <button class="menuBtn" id="menuBtn" aria-label="メニュー">⋯</button>
     <div class="menu" id="menu">
-      <button id="exportBtn">書き出す</button>
-      <button id="resetBtn">すべてリセット</button>
+      <button id="exportBtn">書き出す（テキスト）</button>
+      <button id="exportMdBtn">書き出す（Markdown）</button>
+      <button id="resetBtn">クリア</button>
     </div>
   </div>
 </div>
@@ -475,6 +476,10 @@
   const overlay = document.getElementById('modalOverlay');
   const exportArea = document.getElementById('exportArea');
 
+  // visual ring order matching the diagram's numbering: bottom-mid, bottom-left, mid-left,
+  // top-left, top-mid, top-right, mid-right, bottom-right (starts at 6 o'clock, sweeps around)
+  const RING_ORDER = [7, 6, 3, 0, 1, 2, 5, 8];
+
   function buildExportText(){
     let out = '=== マンダラート ===\n\n';
     out += `中心ゴール: ${grid[4][4] || '(未入力)'}\n\n`;
@@ -492,9 +497,30 @@
     return out;
   }
 
+  function buildMarkdownText(){
+    let out = `# ${grid[4][4] || '目標'}\n\n`;
+    RING_ORDER.forEach((themeIdx, i) => {
+      const theme = grid[4][themeIdx] || `テーマ ${i + 1}`;
+      out += `## ${theme}\n`;
+      RING_ORDER.forEach((detailIdx) => {
+        const val = grid[themeIdx][detailIdx];
+        if (val) out += `- ${val}\n`;
+      });
+      out += '\n';
+    });
+    return out;
+  }
+
   document.getElementById('exportBtn').addEventListener('click', () => {
     menu.classList.remove('open');
     exportArea.value = buildExportText();
+    overlay.classList.add('open');
+    exportArea.focus();
+    exportArea.select();
+  });
+  document.getElementById('exportMdBtn').addEventListener('click', () => {
+    menu.classList.remove('open');
+    exportArea.value = buildMarkdownText();
     overlay.classList.add('open');
     exportArea.focus();
     exportArea.select();
@@ -513,7 +539,7 @@
   });
   document.getElementById('resetBtn').addEventListener('click', () => {
     menu.classList.remove('open');
-    if (!confirm('すべての内容を消去します。よろしいですか？')) return;
+    if (!confirm('すべての内容をクリアします。よろしいですか？')) return;
     grid = Array.from({length:9}, () => Array(9).fill(''));
     currentBlock = 4;
     render();
