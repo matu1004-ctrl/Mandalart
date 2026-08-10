@@ -515,17 +515,14 @@
     menu.classList.remove('open');
     exportArea.value = buildExportText();
     overlay.classList.add('open');
-    exportArea.focus();
-    exportArea.select();
   });
   document.getElementById('exportMdBtn').addEventListener('click', () => {
     menu.classList.remove('open');
     exportArea.value = buildMarkdownText();
     overlay.classList.add('open');
-    exportArea.focus();
-    exportArea.select();
   });
   document.getElementById('closeModalBtn').addEventListener('click', () => overlay.classList.remove('open'));
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.classList.remove('open'); });
   document.getElementById('copyBtn').addEventListener('click', async () => {
     try{
       await navigator.clipboard.writeText(exportArea.value);
