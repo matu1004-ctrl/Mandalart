@@ -83,7 +83,7 @@
   /* board area */
   .stage{
     flex:1; display:flex; align-items:center; justify-content:center;
-    padding:14px; min-height:0;
+    padding:14px; min-height:0; overflow:hidden;
   }
   .board{
     aspect-ratio:1/1;
@@ -643,6 +643,10 @@
   window.addEventListener('resize', sizeBoard);
   window.addEventListener('orientationchange', sizeBoard);
   sizeBoard();
+  // layout can shift slightly after the first paint (fonts, safe-area insets settling),
+  // so re-measure a couple of times shortly after load to make sure the square is accurate
+  requestAnimationFrame(() => requestAnimationFrame(sizeBoard));
+  setTimeout(sizeBoard, 300);
 })();
 </script>
 </body>
