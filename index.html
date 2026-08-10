@@ -347,19 +347,19 @@
     ta.addEventListener('blur', () => { ta.style.pointerEvents = 'none'; });
 
     cellEl.addEventListener('pointerdown', (e) => {
-      if (document.activeElement === ta) return; // already editing this cell -> let native gestures (long-press paste, cursor) handle it
-
-      startX = e.clientX; startY = e.clientY;
       const now = Date.now();
       const isDoubleTapDown = (lastTapDownC === c && (now - lastTapDownTime) < DOUBLE_TAP_MS);
       lastTapDownC = c; lastTapDownTime = now;
       cellEl.dataset.doubleTrigger = isDoubleTapDown ? '1' : '0';
 
       if (isDoubleTapDown){
-        // the actual navigation happens on pointerup; skip drag/edit setup for this touch
+        // the actual navigation happens on pointerup; skip everything else for this touch
         return;
       }
 
+      if (document.activeElement === ta) return; // already editing this cell -> let native gestures (long-press paste, cursor) handle it
+
+      startX = e.clientX; startY = e.clientY;
       clearTimeout(longPressTimer);
       longPressTimer = setTimeout(() => {
         isDragging = true;
@@ -410,6 +410,14 @@
     }
 
     cellEl.addEventListener('pointerup', () => {
+      if (cellEl.dataset.doubleTrigger === '1'){
+        cellEl.dataset.doubleTrigger = '0';
+        lastTapDownC = null; lastTapDownTime = 0;
+        clearTimeout(longPressTimer);
+        if (canExpand(c)) expand(c); // expand() blurs any focused cell
+        return;
+      }
+
       if (document.activeElement === ta) return; // already editing this cell -> native gestures handle taps/cursor
       clearTimeout(longPressTimer);
       if (bigButtonHeld){
@@ -417,13 +425,6 @@
         return;
       }
       if (isDragging){ finishDrag(); return; }
-
-      if (cellEl.dataset.doubleTrigger === '1'){
-        cellEl.dataset.doubleTrigger = '0';
-        lastTapDownC = null; lastTapDownTime = 0;
-        if (canExpand(c)) expand(c); // expand() blurs any focused cell
-        return;
-      }
 
       // fresh single tap -> focus immediately (iOS only opens the keyboard for focus()
       // called synchronously inside the gesture, never after a delay)
