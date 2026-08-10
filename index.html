@@ -125,8 +125,8 @@
     outline:none;
     display:flex; align-items:center;
     user-select:text; -webkit-user-select:text;
-    pointer-events:none;
   }
+  .cell textarea{ pointer-events:none; }
   .cell.center textarea{ font-weight:700; }
 
   /* export modal */
@@ -404,25 +404,29 @@
       }
       if (isDragging){ finishDrag(); return; }
 
+      const now = Date.now();
+      const isDoubleTap = (lastTap.c === c && (now - lastTap.time) < DOUBLE_TAP_MS);
+
+      if (isDoubleTap){
+        // a fast second tap always means "expand", even though the first tap of the
+        // pair already focused this cell (needed so single-tap opens the keyboard on iOS)
+        lastTap = { c:null, time:0 };
+        if (canExpand(c)) expand(c); // expand() blurs any focused cell
+        return;
+      }
+
       const wasEditingThisCell = cellEl.dataset.wasEditing === '1';
       if (wasEditingThisCell){
-        // tapping the cell that's already being edited simply exits edit mode
+        // a slow tap on the cell that's already being edited simply exits edit mode
         ta.blur();
         lastTap = { c:null, time:0 };
         return;
       }
 
-      // not a drag, not already editing -> tap. Focus immediately (iOS only opens the
-      // keyboard for focus() called synchronously inside the gesture, never after a delay).
-      const now = Date.now();
-      const isDoubleTap = (lastTap.c === c && (now - lastTap.time) < DOUBLE_TAP_MS);
-      if (isDoubleTap){
-        lastTap = { c:null, time:0 };
-        if (canExpand(c)) expand(c); // expand() blurs any focused cell
-      } else {
-        lastTap = { c:c, time:now };
-        ta.focus();
-      }
+      // fresh single tap -> focus immediately (iOS only opens the keyboard for focus()
+      // called synchronously inside the gesture, never after a delay)
+      lastTap = { c:c, time:now };
+      ta.focus();
     });
 
     cellEl.addEventListener('pointercancel', () => {
