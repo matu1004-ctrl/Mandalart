@@ -227,6 +227,7 @@
     <div class="menu" id="menu">
       <button id="exportBtn">書き出す（テキスト）</button>
       <button id="exportMdBtn">書き出す（Markdown）</button>
+      <button id="exportWfBtn">書き出す（Workflowy）</button>
       <button id="resetBtn">クリア</button>
     </div>
   </div>
@@ -516,6 +517,23 @@
     return out;
   }
 
+  function buildWorkflowyText(){
+    const goal = (grid[4][4] || '').trim();
+    let out = `- ${goal || '目標'}\n`;
+    RING_ORDER.forEach((themeIdx, i) => {
+      const theme = (grid[4][themeIdx] || '').trim();
+      const details = RING_ORDER
+        .map((detailIdx) => (grid[themeIdx][detailIdx] || '').trim())
+        .filter(Boolean);
+      if (!theme && details.length === 0) return;
+      out += `  - ${theme || `テーマ ${i + 1}`}\n`;
+      details.forEach((val) => {
+        out += `    - ${val}\n`;
+      });
+    });
+    return out;
+  }
+
   document.getElementById('exportBtn').addEventListener('pointerup', () => {
     menu.classList.remove('open');
     exportArea.value = buildExportText();
@@ -524,6 +542,11 @@
   document.getElementById('exportMdBtn').addEventListener('pointerup', () => {
     menu.classList.remove('open');
     exportArea.value = buildMarkdownText();
+    overlay.classList.add('open');
+  });
+  document.getElementById('exportWfBtn').addEventListener('pointerup', () => {
+    menu.classList.remove('open');
+    exportArea.value = buildWorkflowyText();
     overlay.classList.add('open');
   });
   document.getElementById('closeModalBtn').addEventListener('pointerup', () => overlay.classList.remove('open'));
