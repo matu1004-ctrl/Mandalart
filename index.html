@@ -329,7 +329,7 @@
     scheduleSave();
   }
 
-  backBtn.addEventListener('click', () => { currentBlock = 4; render(); scheduleSave(); });
+  backBtn.addEventListener('pointerup', () => { currentBlock = 4; render(); scheduleSave(); });
 
   // ---- gestures: tap-to-edit, long-press+drag to swap, double-tap to expand ----
   const LONG_PRESS_MS = 380;
@@ -470,8 +470,8 @@
   }
 
   // ---- menu / export / reset ----
-  menuBtn.addEventListener('click', (e) => { e.stopPropagation(); menu.classList.toggle('open'); });
-  document.addEventListener('click', () => menu.classList.remove('open'));
+  menuBtn.addEventListener('pointerup', (e) => { e.stopPropagation(); menu.classList.toggle('open'); });
+  document.addEventListener('pointerup', () => menu.classList.remove('open'));
 
   const overlay = document.getElementById('modalOverlay');
   const exportArea = document.getElementById('exportArea');
@@ -511,19 +511,19 @@
     return out;
   }
 
-  document.getElementById('exportBtn').addEventListener('click', () => {
+  document.getElementById('exportBtn').addEventListener('pointerup', () => {
     menu.classList.remove('open');
     exportArea.value = buildExportText();
     overlay.classList.add('open');
   });
-  document.getElementById('exportMdBtn').addEventListener('click', () => {
+  document.getElementById('exportMdBtn').addEventListener('pointerup', () => {
     menu.classList.remove('open');
     exportArea.value = buildMarkdownText();
     overlay.classList.add('open');
   });
-  document.getElementById('closeModalBtn').addEventListener('click', () => overlay.classList.remove('open'));
-  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.classList.remove('open'); });
-  document.getElementById('copyBtn').addEventListener('click', async () => {
+  document.getElementById('closeModalBtn').addEventListener('pointerup', () => overlay.classList.remove('open'));
+  overlay.addEventListener('pointerup', (e) => { if (e.target === overlay) overlay.classList.remove('open'); });
+  document.getElementById('copyBtn').addEventListener('pointerup', async () => {
     try{
       await navigator.clipboard.writeText(exportArea.value);
       document.getElementById('copyBtn').textContent = 'コピーしました';
@@ -534,7 +534,7 @@
     }
     setTimeout(() => { document.getElementById('copyBtn').textContent = 'コピー'; }, 1500);
   });
-  document.getElementById('resetBtn').addEventListener('click', () => {
+  document.getElementById('resetBtn').addEventListener('pointerup', () => {
     menu.classList.remove('open');
     if (!confirm('すべての内容をクリアします。よろしいですか？')) return;
     grid = Array.from({length:9}, () => Array(9).fill(''));
