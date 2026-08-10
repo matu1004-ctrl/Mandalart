@@ -9,7 +9,7 @@
 <title>マンダラート</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Shuippori+Mincho:wght@600;700&family=Zen+Kaku+Gothic+New:wght@400;500;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Shippori+Mincho:wght@600;700&family=Zen+Kaku+Gothic+New:wght@400;500;700&display=swap" rel="stylesheet">
 <style>
   :root{
     --bg:#ffffff;
@@ -86,8 +86,6 @@
     padding:14px; min-height:0;
   }
   .board{
-    width:100%; height:100%;
-    max-width:100%; max-height:100%;
     aspect-ratio:1/1;
     display:grid;
     grid-template-columns:repeat(3,1fr);
@@ -219,7 +217,6 @@
   <div class="menuWrap">
     <button class="menuBtn" id="menuBtn" aria-label="メニュー">⋯</button>
     <div class="menu" id="menu">
-      <button id="pasteBtn">クリップボードから貼り付け</button>
       <button id="exportBtn">書き出す（テキスト）</button>
       <button id="exportMdBtn">書き出す（Markdown）</button>
       <button id="resetBtn">クリア</button>
@@ -345,9 +342,13 @@
   let dropTargetEl = null;
 
   function attachGestures(cellEl, ta, c){
-    ta.style.pointerEvents = 'none'; // all taps are handled by the wrapper; focus() still works without this
+    ta.style.pointerEvents = 'none'; // while not editing, all taps are handled by the wrapper
+    ta.addEventListener('focus', () => { ta.style.pointerEvents = 'auto'; }); // hand touches to iOS's native text editing (selection, paste) while editing
+    ta.addEventListener('blur', () => { ta.style.pointerEvents = 'none'; });
 
     cellEl.addEventListener('pointerdown', (e) => {
+      if (document.activeElement === ta) return; // already editing this cell -> let native gestures (long-press paste, cursor) handle it
+
       startX = e.clientX; startY = e.clientY;
       const now = Date.now();
       const isDoubleTapDown = (lastTapDownC === c && (now - lastTapDownTime) < DOUBLE_TAP_MS);
@@ -359,20 +360,18 @@
         return;
       }
 
-      const wasEditingThisCell = (document.activeElement === ta);
       clearTimeout(longPressTimer);
       longPressTimer = setTimeout(() => {
         isDragging = true;
         dragCell = cellEl; dragTa = ta; dragC = c;
-        if (wasEditingThisCell) ta.blur();
         cellEl.classList.add('dragging');
         cellEl.style.pointerEvents = 'none'; // so elementFromPoint sees the cell underneath, not this one
         try{ cellEl.setPointerCapture(e.pointerId); }catch(err){}
       }, LONG_PRESS_MS);
-      cellEl.dataset.wasEditing = wasEditingThisCell ? '1' : '0';
     });
 
     cellEl.addEventListener('pointermove', (e) => {
+      if (document.activeElement === ta) return;
       if (!isDragging){
         const dx = Math.abs(e.clientX - startX), dy = Math.abs(e.clientY - startY);
         if (dx > MOVE_CANCEL_PX || dy > MOVE_CANCEL_PX) clearTimeout(longPressTimer);
@@ -411,6 +410,7 @@
     }
 
     cellEl.addEventListener('pointerup', () => {
+      if (document.activeElement === ta) return; // already editing this cell -> native gestures handle taps/cursor
       clearTimeout(longPressTimer);
       if (bigButtonHeld){
         if (!longTextTarget) openLongText(c);
@@ -422,13 +422,6 @@
         cellEl.dataset.doubleTrigger = '0';
         lastTapDownC = null; lastTapDownTime = 0;
         if (canExpand(c)) expand(c); // expand() blurs any focused cell
-        return;
-      }
-
-      const wasEditingThisCell = cellEl.dataset.wasEditing === '1';
-      if (wasEditingThisCell){
-        // tapping the cell that's already being edited simply exits edit mode
-        ta.blur();
         return;
       }
 
@@ -474,24 +467,6 @@
     render();
   }
 
-  // Best-effort: if the center cell is still empty, try to pre-fill it with clipboard text.
-  // Note: most mobile browsers (including iOS Safari) only allow reading the clipboard in
-  // direct response to a user tap, not automatically on page load, so this quietly does
-  // nothing there. It mainly helps on desktop browsers that permit it.
-  async function tryPrefillFromClipboard(){
-    if (grid[4][4]) return;
-    try{
-      if (navigator.clipboard && navigator.clipboard.readText){
-        const text = (await navigator.clipboard.readText() || '').trim();
-        if (text && !grid[4][4]){
-          grid[4][4] = text;
-          if (currentBlock === 4) render();
-          scheduleSave();
-        }
-      }
-    }catch(err){ /* clipboard read not permitted here - ignore silently */ }
-  }
-
   // ---- menu / export / reset ----
   menuBtn.addEventListener('pointerup', (e) => { e.stopPropagation(); menu.classList.toggle('open'); });
   document.addEventListener('pointerup', () => menu.classList.remove('open'));
@@ -532,21 +507,6 @@
     return out;
   }
 
-  document.getElementById('pasteBtn').addEventListener('pointerup', async () => {
-    menu.classList.remove('open');
-    try{
-      const text = (await navigator.clipboard.readText() || '').trim();
-      if (text){
-        grid[4][4] = text;
-        if (currentBlock === 4) render();
-        scheduleSave();
-      } else {
-        alert('クリップボードにテキストが見つかりませんでした。');
-      }
-    }catch(err){
-      alert('クリップボードを読み取れませんでした。コピー操作の直後にもう一度お試しください。');
-    }
-  });
   document.getElementById('exportBtn').addEventListener('pointerup', () => {
     menu.classList.remove('open');
     exportArea.value = buildExportText();
@@ -673,7 +633,16 @@
   });
 
   loadData();
-  tryPrefillFromClipboard();
+  function sizeBoard(){
+    const stage = document.querySelector('.stage');
+    if (!stage) return;
+    const size = Math.max(0, Math.min(stage.clientWidth, stage.clientHeight));
+    boardEl.style.width = size + 'px';
+    boardEl.style.height = size + 'px';
+  }
+  window.addEventListener('resize', sizeBoard);
+  window.addEventListener('orientationchange', sizeBoard);
+  sizeBoard();
 })();
 </script>
 </body>
