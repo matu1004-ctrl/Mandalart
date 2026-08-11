@@ -57,6 +57,7 @@
     visibility:hidden; cursor:pointer;
   }
   .backBtn.show{ visibility:visible; }
+  .backBtn.longPressReady{ color:var(--accent); }
   .title{
     flex:1; text-align:center; font-family:"Shippori Mincho", serif;
     font-weight:700; font-size:15px; letter-spacing:.03em;
@@ -307,6 +308,88 @@
     }
   }
 
+  function swapCells(i, j){
+    if (i === j) return;
+    const node = currentNode();
+    const tmpCell = node.cells[i];
+    node.cells[i] = node.cells[j];
+    node.cells[j] = tmpCell;
+    const tmpChild = node.children[i];
+    node.children[i] = node.children[j];
+    node.children[j] = tmpChild;
+    syncMirror(i);
+    syncMirror(j);
+  }
+
+  // Shared drag state so pointerup always finishes/cancels correctly (iOS capture can fail).
+  let dragState = null;
+
+  function cancelDrag(){
+    if (!dragState) return;
+    const { cellEl, dropTargetEl } = dragState;
+    if (cellEl){
+      cellEl.style.transform = '';
+      cellEl.classList.remove('dragging');
+      cellEl.style.pointerEvents = '';
+    }
+    if (dropTargetEl) dropTargetEl.classList.remove('dropTarget');
+    dragState = null;
+  }
+
+  function finishDrag(){
+    if (!dragState) return;
+    const { sourceC, dropTargetEl } = dragState;
+    const targetC = dropTargetEl ? Number(dropTargetEl.dataset.c) : null;
+    cancelDrag();
+    if (targetC !== null && targetC !== sourceC){
+      swapCells(sourceC, targetC);
+      render();
+      scheduleSave();
+    }
+  }
+
+  function onDragMove(e){
+    if (!dragState) return;
+    const { cellEl, startX, startY } = dragState;
+    const moveX = e.clientX - startX, moveY = e.clientY - startY;
+    cellEl.style.transform = `translate(${moveX}px, ${moveY}px) scale(1.04)`;
+
+    if (dragState.dropTargetEl){
+      dragState.dropTargetEl.classList.remove('dropTarget');
+      dragState.dropTargetEl = null;
+    }
+    const under = document.elementFromPoint(e.clientX, e.clientY);
+    const cand = under ? under.closest('.cell') : null;
+    if (cand && cand !== cellEl && boardEl.contains(cand)){
+      cand.classList.add('dropTarget');
+      dragState.dropTargetEl = cand;
+    }
+  }
+
+  function onDragEnd(){
+    if (!dragState) return;
+    finishDrag();
+    document.removeEventListener('pointermove', onDragMove);
+    document.removeEventListener('pointerup', onDragEnd);
+    document.removeEventListener('pointercancel', onDragCancel);
+  }
+
+  function onDragCancel(){
+    cancelDrag();
+    document.removeEventListener('pointermove', onDragMove);
+    document.removeEventListener('pointerup', onDragEnd);
+    document.removeEventListener('pointercancel', onDragCancel);
+  }
+
+  function startDrag(cellEl, c, startX, startY){
+    dragState = { sourceC: c, cellEl, dropTargetEl: null, startX, startY };
+    cellEl.classList.add('dragging');
+    cellEl.style.pointerEvents = 'none';
+    document.addEventListener('pointermove', onDragMove);
+    document.addEventListener('pointerup', onDragEnd);
+    document.addEventListener('pointercancel', onDragCancel);
+  }
+
   function render(){
     const node = currentNode();
     // title / back button
@@ -361,134 +444,119 @@
     scheduleSave();
   }
 
-  backBtn.addEventListener('pointerup', () => {
-    navPath = [navPath[0]];
-    render();
-    scheduleSave();
-  });
-
   // ---- gestures: tap-to-edit, long-press to expand/back, long-press+drag to swap ----
-  const LONG_PRESS_MS = 450;
+  const LONG_PRESS_MS = 320;
   const MOVE_CANCEL_PX = 28;
 
-  let longPressTimer = null;
-  let longPressReady = false;
-  let isDragging = false;
-  let dragCell = null, dragTa = null, dragC = null;
-  let startX = 0, startY = 0;
-  let dropTargetEl = null;
+  let backPressTimer = null;
+  let backPressReady = false;
+
+  backBtn.addEventListener('pointerdown', () => {
+    if (atRoot()) return;
+    backPressReady = false;
+    clearTimeout(backPressTimer);
+    backBtn.classList.remove('longPressReady');
+    backPressTimer = setTimeout(() => {
+      backPressReady = true;
+      backBtn.classList.add('longPressReady');
+    }, LONG_PRESS_MS);
+  });
+  backBtn.addEventListener('pointerup', () => {
+    clearTimeout(backPressTimer);
+    backBtn.classList.remove('longPressReady');
+    if (backPressReady && !atRoot()){
+      navPath = [navPath[0]];
+      render();
+      scheduleSave();
+    }
+    backPressReady = false;
+  });
+  backBtn.addEventListener('pointercancel', () => {
+    clearTimeout(backPressTimer);
+    backBtn.classList.remove('longPressReady');
+    backPressReady = false;
+  });
 
   function attachGestures(cellEl, ta, c){
     ta.style.pointerEvents = 'none';
     ta.addEventListener('focus', () => { ta.style.pointerEvents = 'auto'; });
     ta.addEventListener('blur', () => { ta.style.pointerEvents = 'none'; });
 
-    cellEl.addEventListener('pointerdown', (e) => {
-      if (document.activeElement === ta) return;
+    let lpTimer = null;
+    let lpReady = false;
+    let startX = 0, startY = 0;
 
+    function isEditing(){ return document.activeElement === ta; }
+
+    function beginPress(e){
       startX = e.clientX; startY = e.clientY;
-      longPressReady = false;
-      clearTimeout(longPressTimer);
+      lpReady = false;
+      clearTimeout(lpTimer);
       cellEl.classList.remove('longPressReady');
-      longPressTimer = setTimeout(() => {
-        longPressReady = true;
+      lpTimer = setTimeout(() => {
+        lpReady = true;
         cellEl.classList.add('longPressReady');
       }, LONG_PRESS_MS);
-    });
-
-    cellEl.addEventListener('pointermove', (e) => {
-      if (document.activeElement === ta) return;
-      const dx = Math.abs(e.clientX - startX), dy = Math.abs(e.clientY - startY);
-
-      if (!longPressReady && !isDragging){
-        if (dx > MOVE_CANCEL_PX || dy > MOVE_CANCEL_PX) clearTimeout(longPressTimer);
-        return;
-      }
-
-      if (longPressReady && !isDragging && (dx > MOVE_CANCEL_PX || dy > MOVE_CANCEL_PX)){
-        isDragging = true;
-        dragCell = cellEl; dragTa = ta; dragC = c;
-        cellEl.classList.remove('longPressReady');
-        cellEl.classList.add('dragging');
-        cellEl.style.pointerEvents = 'none';
-        try{ cellEl.setPointerCapture(e.pointerId); }catch(err){}
-      }
-
-      if (!isDragging) return;
-      const moveX = e.clientX - startX, moveY = e.clientY - startY;
-      dragCell.style.transform = `translate(${moveX}px, ${moveY}px) scale(1.04)`;
-
-      if (dropTargetEl){ dropTargetEl.classList.remove('dropTarget'); dropTargetEl = null; }
-      const under = document.elementFromPoint(e.clientX, e.clientY);
-      const cand = under ? under.closest('.cell') : null;
-      if (cand && cand !== dragCell && boardEl.contains(cand)){
-        cand.classList.add('dropTarget');
-        dropTargetEl = cand;
-      }
-    });
-
-    function resetDrag(){
-      isDragging = false;
-      if (dragCell){
-        dragCell.style.transform = '';
-        dragCell.classList.remove('dragging');
-        dragCell.style.pointerEvents = '';
-      }
-      dragCell = null; dragTa = null; dragC = null;
     }
 
-    function finishDrag(){
-      resetDrag();
-      if (dropTargetEl){
-        const j = Number(dropTargetEl.dataset.c);
-        const i = dragC;
-        const node = currentNode();
-        const tmp = node.cells[i];
-        node.cells[i] = node.cells[j];
-        node.cells[j] = tmp;
-        const tmpChild = node.children[i];
-        node.children[i] = node.children[j];
-        node.children[j] = tmpChild;
-        syncMirror(i);
-        syncMirror(j);
-        dropTargetEl.classList.remove('dropTarget');
-        dropTargetEl = null;
-        render();
-        scheduleSave();
-      }
-    }
-
-    cellEl.addEventListener('pointerup', () => {
-      clearTimeout(longPressTimer);
+    function cancelPress(){
+      clearTimeout(lpTimer);
+      lpReady = false;
       cellEl.classList.remove('longPressReady');
+    }
 
-      if (document.activeElement === ta) return;
-      if (bigButtonHeld){
-        clearTimeout(longPressTimer);
-        longPressReady = false;
-        if (!longTextTarget) openLongText(c);
+    function onMove(e){
+      if (dragState) return;
+      const dx = Math.abs(e.clientX - startX), dy = Math.abs(e.clientY - startY);
+      if (!lpReady){
+        if (dx > MOVE_CANCEL_PX || dy > MOVE_CANCEL_PX) cancelPress();
         return;
       }
-      if (isDragging){ finishDrag(); longPressReady = false; return; }
+      if (isEditing()) return;
+      if (dx > MOVE_CANCEL_PX || dy > MOVE_CANCEL_PX){
+        cancelPress();
+        startDrag(cellEl, c, startX, startY);
+      }
+    }
 
-      if (longPressReady){
-        longPressReady = false;
+    function onUp(){
+      if (dragState) return;
+      const wasReady = lpReady;
+      cancelPress();
+
+      if (wasReady){
         if (canExpand(c)) expand(c);
         return;
       }
 
-      ta.focus();
-    });
-
-    cellEl.addEventListener('pointercancel', () => {
-      clearTimeout(longPressTimer);
-      longPressReady = false;
-      cellEl.classList.remove('longPressReady');
-      if (isDragging){
-        resetDrag();
-        if (dropTargetEl){ dropTargetEl.classList.remove('dropTarget'); dropTargetEl = null; }
+      if (!isEditing()){
+        if (bigButtonHeld){
+          if (!longTextTarget) openLongText(c);
+          return;
+        }
+        ta.focus();
       }
+    }
+
+    function onCancel(){
+      cancelPress();
+    }
+
+    cellEl.addEventListener('pointerdown', (e) => {
+      if (isEditing()) return;
+      beginPress(e);
     });
+    cellEl.addEventListener('pointermove', onMove);
+    cellEl.addEventListener('pointerup', onUp);
+    cellEl.addEventListener('pointercancel', onCancel);
+
+    ta.addEventListener('pointerdown', (e) => {
+      if (!isEditing()) return;
+      beginPress(e);
+    });
+    ta.addEventListener('pointermove', onMove);
+    ta.addEventListener('pointerup', onUp);
+    ta.addEventListener('pointercancel', onCancel);
   }
 
   // ---- persistence (browser localStorage: works on any normal hosted page) ----
