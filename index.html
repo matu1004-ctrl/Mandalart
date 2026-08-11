@@ -115,6 +115,10 @@
     border-color:var(--accent);
     box-shadow: inset 0 0 0 2px var(--accent);
   }
+  .cell.longPressReady{
+    border-color:var(--accent);
+    box-shadow: inset 0 0 0 2px rgba(178,58,46,.35);
+  }
   textarea{
     width:100%; height:100%;
     border:0; resize:none; background:transparent;
@@ -363,56 +367,56 @@
     scheduleSave();
   });
 
-  // ---- gestures: tap-to-edit, long-press+drag to swap, double-tap to expand ----
-  const LONG_PRESS_MS = 380;
-  const DOUBLE_TAP_MS = 350;
-  const MOVE_CANCEL_PX = 28; // generous, so natural finger jitter never breaks a long-press
+  // ---- gestures: tap-to-edit, long-press to expand/back, long-press+drag to swap ----
+  const LONG_PRESS_MS = 450;
+  const MOVE_CANCEL_PX = 28;
 
-  let lastTapDownC = null, lastTapDownTime = 0;
   let longPressTimer = null;
+  let longPressReady = false;
   let isDragging = false;
   let dragCell = null, dragTa = null, dragC = null;
   let startX = 0, startY = 0;
   let dropTargetEl = null;
 
   function attachGestures(cellEl, ta, c){
-    ta.style.pointerEvents = 'none'; // while not editing, all taps are handled by the wrapper
-    ta.addEventListener('focus', () => { ta.style.pointerEvents = 'auto'; }); // hand touches to iOS's native text editing (selection, paste) while editing
+    ta.style.pointerEvents = 'none';
+    ta.addEventListener('focus', () => { ta.style.pointerEvents = 'auto'; });
     ta.addEventListener('blur', () => { ta.style.pointerEvents = 'none'; });
 
     cellEl.addEventListener('pointerdown', (e) => {
-      const now = Date.now();
-      const isDoubleTapDown = (lastTapDownC === c && (now - lastTapDownTime) < DOUBLE_TAP_MS);
-      lastTapDownC = c; lastTapDownTime = now;
-      cellEl.dataset.doubleTrigger = isDoubleTapDown ? '1' : '0';
-
-      if (isDoubleTapDown){
-        // the actual navigation happens on pointerup; skip everything else for this touch
-        return;
-      }
-
-      if (document.activeElement === ta) return; // already editing this cell -> let native gestures (long-press paste, cursor) handle it
+      if (document.activeElement === ta) return;
 
       startX = e.clientX; startY = e.clientY;
+      longPressReady = false;
       clearTimeout(longPressTimer);
+      cellEl.classList.remove('longPressReady');
       longPressTimer = setTimeout(() => {
-        isDragging = true;
-        dragCell = cellEl; dragTa = ta; dragC = c;
-        cellEl.classList.add('dragging');
-        cellEl.style.pointerEvents = 'none'; // so elementFromPoint sees the cell underneath, not this one
-        try{ cellEl.setPointerCapture(e.pointerId); }catch(err){}
+        longPressReady = true;
+        cellEl.classList.add('longPressReady');
       }, LONG_PRESS_MS);
     });
 
     cellEl.addEventListener('pointermove', (e) => {
       if (document.activeElement === ta) return;
-      if (!isDragging){
-        const dx = Math.abs(e.clientX - startX), dy = Math.abs(e.clientY - startY);
+      const dx = Math.abs(e.clientX - startX), dy = Math.abs(e.clientY - startY);
+
+      if (!longPressReady && !isDragging){
         if (dx > MOVE_CANCEL_PX || dy > MOVE_CANCEL_PX) clearTimeout(longPressTimer);
         return;
       }
-      const dx = e.clientX - startX, dy = e.clientY - startY;
-      dragCell.style.transform = `translate(${dx}px, ${dy}px) scale(1.04)`;
+
+      if (longPressReady && !isDragging && (dx > MOVE_CANCEL_PX || dy > MOVE_CANCEL_PX)){
+        isDragging = true;
+        dragCell = cellEl; dragTa = ta; dragC = c;
+        cellEl.classList.remove('longPressReady');
+        cellEl.classList.add('dragging');
+        cellEl.style.pointerEvents = 'none';
+        try{ cellEl.setPointerCapture(e.pointerId); }catch(err){}
+      }
+
+      if (!isDragging) return;
+      const moveX = e.clientX - startX, moveY = e.clientY - startY;
+      dragCell.style.transform = `translate(${moveX}px, ${moveY}px) scale(1.04)`;
 
       if (dropTargetEl){ dropTargetEl.classList.remove('dropTarget'); dropTargetEl = null; }
       const under = document.elementFromPoint(e.clientX, e.clientY);
@@ -423,11 +427,18 @@
       }
     });
 
-    function finishDrag(){
+    function resetDrag(){
       isDragging = false;
-      dragCell.style.transform = '';
-      dragCell.classList.remove('dragging');
-      dragCell.style.pointerEvents = '';
+      if (dragCell){
+        dragCell.style.transform = '';
+        dragCell.classList.remove('dragging');
+        dragCell.style.pointerEvents = '';
+      }
+      dragCell = null; dragTa = null; dragC = null;
+    }
+
+    function finishDrag(){
+      resetDrag();
       if (dropTargetEl){
         const j = Number(dropTargetEl.dataset.c);
         const i = dragC;
@@ -448,34 +459,33 @@
     }
 
     cellEl.addEventListener('pointerup', () => {
-      if (cellEl.dataset.doubleTrigger === '1'){
-        cellEl.dataset.doubleTrigger = '0';
-        lastTapDownC = null; lastTapDownTime = 0;
-        clearTimeout(longPressTimer);
-        if (canExpand(c)) expand(c); // expand() blurs any focused cell
-        return;
-      }
-
-      if (document.activeElement === ta) return; // already editing this cell -> native gestures handle taps/cursor
       clearTimeout(longPressTimer);
+      cellEl.classList.remove('longPressReady');
+
+      if (document.activeElement === ta) return;
       if (bigButtonHeld){
+        clearTimeout(longPressTimer);
+        longPressReady = false;
         if (!longTextTarget) openLongText(c);
         return;
       }
-      if (isDragging){ finishDrag(); return; }
+      if (isDragging){ finishDrag(); longPressReady = false; return; }
 
-      // fresh single tap -> focus immediately (iOS only opens the keyboard for focus()
-      // called synchronously inside the gesture, never after a delay)
+      if (longPressReady){
+        longPressReady = false;
+        if (canExpand(c)) expand(c);
+        return;
+      }
+
       ta.focus();
     });
 
     cellEl.addEventListener('pointercancel', () => {
       clearTimeout(longPressTimer);
+      longPressReady = false;
+      cellEl.classList.remove('longPressReady');
       if (isDragging){
-        isDragging = false;
-        dragCell.style.transform = '';
-        dragCell.classList.remove('dragging');
-        dragCell.style.pointerEvents = '';
+        resetDrag();
         if (dropTargetEl){ dropTargetEl.classList.remove('dropTarget'); dropTargetEl = null; }
       }
     });
