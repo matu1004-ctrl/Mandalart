@@ -142,20 +142,23 @@
     width:133.34%; height:133.34%;
     transform: translate(-50%,-50%) scale(0.75);
     transform-origin:center;
-    display:flex;
-    align-items:center;
-    justify-content:center;
     pointer-events:none;
     overflow:hidden;
   }
   .cell-editor{
     display:block;
+    position:absolute;
+    inset:0;
     width:100%;
-    max-height:100%;
+    height:100%;
+    max-height:none;
+    box-sizing:border-box;
     white-space:pre-wrap;
     word-break:break-word;
     overflow:hidden;
     text-align:center;
+    /* keep caret usable even when empty */
+    min-height:100%;
   }
   .cell-editor:empty::before{
     content:attr(data-placeholder);
@@ -346,6 +349,9 @@
           <option value="20">20</option>
           <option value="22">22</option>
           <option value="24">24</option>
+          <option value="28">28</option>
+          <option value="32">32</option>
+          <option value="36">36</option>
         </select>
       </div>
       <div class="style-row">
@@ -398,7 +404,7 @@
         const parsed = JSON.parse(raw);
         const size = Number(parsed && parsed.size);
         const family = parsed && parsed.family;
-        if ([12,14,16,18,20,22,24].includes(size)) styleSettings.size = size;
+        if ([12,14,16,18,20,22,24,28,32,36].includes(size)) styleSettings.size = size;
         if (FONT_FAMILIES[family]) styleSettings.family = family;
       }
     }catch(e){}
@@ -778,7 +784,20 @@
 
   function attachGestures(cellEl, ta, c){
     ta.style.pointerEvents = 'none';
-    ta.addEventListener('focus', () => { ta.style.pointerEvents = 'auto'; });
+    ta.addEventListener('focus', () => {
+      ta.style.pointerEvents = 'auto';
+      // iOS: empty contenteditable sometimes needs an explicit caret
+      try{
+        const sel = window.getSelection();
+        if (sel && !ta.textContent){
+          const range = document.createRange();
+          range.selectNodeContents(ta);
+          range.collapse(true);
+          sel.removeAllRanges();
+          sel.addRange(range);
+        }
+      }catch(e){}
+    });
     ta.addEventListener('blur', () => { ta.style.pointerEvents = 'none'; });
 
     let lpTimer = null;
@@ -824,8 +843,11 @@
       cancelPress();
 
       if (wasReady){
-        if (canExpand(c)) expand(c);
-        return;
+        if (canExpand(c)){
+          expand(c);
+          return;
+        }
+        // center cell at root (etc.): long-press isn't navigation — fall through to edit
       }
 
       if (!isEditing()){
