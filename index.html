@@ -133,24 +133,36 @@
     outline:none;
     user-select:text; -webkit-user-select:text;
   }
-  .cell-editor{
-    display:flex; align-items:center; justify-content:center;
-    white-space:pre-wrap; word-break:break-word;
+  /* IMPORTANT: do not use display:flex/grid on .cell-editor itself.
+     Bold/underline wrap text in <b>/<span>; flex would treat those as
+     separate items and stack characters vertically. */
+  .cell-editor-wrap{
+    position:absolute;
+    top:50%; left:50%;
+    width:133.34%; height:133.34%;
+    transform: translate(-50%,-50%) scale(0.75);
+    transform-origin:center;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    pointer-events:none;
     overflow:hidden;
+  }
+  .cell-editor{
+    display:block;
+    width:100%;
+    max-height:100%;
+    white-space:pre-wrap;
+    word-break:break-word;
+    overflow:hidden;
+    text-align:center;
   }
   .cell-editor:empty::before{
     content:attr(data-placeholder);
     color:var(--ink-soft);
     pointer-events:none;
   }
-  .cell .cell-editor{
-    pointer-events:none;
-    position:absolute;
-    top:50%; left:50%;
-    width:133.34%; height:133.34%;
-    transform: translate(-50%,-50%) scale(0.75);
-    transform-origin:center;
-  }
+  .cell .cell-editor{ pointer-events:none; }
   .cell.center .cell-editor{ font-weight:700; }
   .cell-editor b, .cell-editor strong, .lt-editor b, .lt-editor strong{ font-weight:700; }
   .cell-editor u, .lt-editor u{ text-decoration:underline; }
@@ -437,14 +449,37 @@
     (function walk(node){
       const kids = Array.from(node.childNodes);
       kids.forEach((child) => {
-        if (child.nodeType === 1){
-          if (!ALLOWED_TAGS.test(child.tagName)){
-            while (child.firstChild) node.insertBefore(child.firstChild, child);
-            node.removeChild(child);
-          } else {
-            while (child.attributes.length) child.removeAttribute(child.attributes[0].name);
-            walk(child);
+        if (child.nodeType !== 1) return;
+        const tag = child.tagName.toUpperCase();
+        if (tag === 'SPAN'){
+          const style = (child.getAttribute('style') || '').toLowerCase();
+          const bold = /font-weight\s*:\s*(bold|[6-9]00)/.test(style);
+          const under = /text-decoration[^;]*underline/.test(style);
+          let replacement = null;
+          if (bold && under){
+            replacement = document.createElement('b');
+            const u = document.createElement('u');
+            while (child.firstChild) u.appendChild(child.firstChild);
+            replacement.appendChild(u);
+          } else if (bold){
+            replacement = document.createElement('b');
+            while (child.firstChild) replacement.appendChild(child.firstChild);
+          } else if (under){
+            replacement = document.createElement('u');
+            while (child.firstChild) replacement.appendChild(child.firstChild);
           }
+          if (replacement){
+            node.replaceChild(replacement, child);
+            walk(replacement);
+            return;
+          }
+        }
+        if (!ALLOWED_TAGS.test(child.tagName)){
+          while (child.firstChild) node.insertBefore(child.firstChild, child);
+          node.removeChild(child);
+        } else {
+          while (child.attributes.length) child.removeAttribute(child.attributes[0].name);
+          walk(child);
         }
       });
     })(d);
@@ -663,6 +698,9 @@
       cellEl.className = 'cell' + (c === 4 ? ' center' : '');
       cellEl.dataset.c = c;
 
+      const wrap = document.createElement('div');
+      wrap.className = 'cell-editor-wrap';
+
       const ta = document.createElement('div');
       ta.className = 'cell-editor';
       ta.contentEditable = 'true';
@@ -676,7 +714,8 @@
         if (atRoot() && c === 4){ titleEl.textContent = cellDisplay(node.cells[c]) || 'マンダラート'; }
         scheduleSave();
       });
-      cellEl.appendChild(ta);
+      wrap.appendChild(ta);
+      cellEl.appendChild(wrap);
       boardEl.appendChild(cellEl);
       attachGestures(cellEl, ta, c);
     }
