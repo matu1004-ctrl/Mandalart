@@ -262,9 +262,19 @@
 <script>
 (function(){
   const STORAGE_KEY = 'mandalart:state';
-  const mirrorIdx = [0,1,2,3,5,6,7,8];
-  let grid = Array.from({length:9}, () => Array(9).fill(''));
-  let currentBlock = 4;
+
+  // Each node is one 3x3 board (9 cells, index 4 = center). Non-center cells can be
+  // expanded into a child node (created lazily), which itself can be expanded further,
+  // to any depth. The child's center cell always mirrors the parent's cell that opened it.
+  function makeNode(){
+    return { cells: Array(9).fill(''), children: new Array(9).fill(null) };
+  }
+  let root = makeNode();
+  // navPath: [{node, idx}] from root (idx=null) down to the node currently on screen.
+  let navPath = [{ node: root, idx: null }];
+
+  function currentNode(){ return navPath[navPath.length - 1].node; }
+  function atRoot(){ return navPath.length === 1; }
 
   const boardEl = document.getElementById('board');
   const titleEl = document.getElementById('titleEl');
@@ -277,24 +287,32 @@
   const bigBtn = document.getElementById('bigBtn');
   const bigBtnMain = document.getElementById('bigBtnMain');
   const bigBtnSub = document.getElementById('bigBtnSub');
-  let longTextTarget = null; // { block, c } or null
+  let longTextTarget = null; // { c } or null
 
-  function syncMirror(block, cellIdx){
-    if (block === 4 && cellIdx !== 4){
-      grid[cellIdx][4] = grid[4][cellIdx];
-    } else if (block !== 4 && cellIdx === 4){
-      grid[4][block] = grid[block][4];
+  // Keeps a cell's text in sync with the node it opens into (and the node it came from).
+  function syncMirror(c){
+    const node = currentNode();
+    if (c === 4){
+      if (!atRoot()){
+        const parentEntry = navPath[navPath.length - 2];
+        const myIdx = navPath[navPath.length - 1].idx;
+        parentEntry.node.cells[myIdx] = node.cells[4];
+      }
+    } else if (node.children[c]){
+      node.children[c].cells[4] = node.cells[c];
     }
   }
 
   function render(){
+    const node = currentNode();
     // title / back button
-    if (currentBlock === 4){
+    if (atRoot()){
       backBtn.classList.remove('show');
-      titleEl.textContent = grid[4][4] ? grid[4][4] : 'マンダラート';
+      titleEl.textContent = node.cells[4] ? node.cells[4] : 'マンダラート';
     } else {
       backBtn.classList.add('show');
-      titleEl.textContent = grid[4][currentBlock] ? grid[4][currentBlock] : 'テーマ ' + (currentBlock + 1);
+      const idx = navPath[navPath.length - 1].idx;
+      titleEl.textContent = node.cells[4] ? node.cells[4] : 'テーマ ' + (idx + 1);
     }
 
     boardEl.innerHTML = '';
@@ -304,13 +322,12 @@
       cellEl.dataset.c = c;
 
       const ta = document.createElement('textarea');
-      ta.value = grid[currentBlock][c];
-      ta.setAttribute('placeholder', (currentBlock === 4 && c === 4) ? '目標' : '');
+      ta.value = node.cells[c];
+      ta.setAttribute('placeholder', (atRoot() && c === 4) ? '目標' : '');
       ta.addEventListener('input', () => {
-        grid[currentBlock][c] = ta.value;
-        syncMirror(currentBlock, c);
-        if (currentBlock === 4 && c === 4){ titleEl.textContent = ta.value || 'マンダラート'; }
-        if (currentBlock !== 4 && c === 4){ /* affects root title only, not shown now */ }
+        node.cells[c] = ta.value;
+        syncMirror(c);
+        if (atRoot() && c === 4){ titleEl.textContent = ta.value || 'マンダラート'; }
         scheduleSave();
       });
       cellEl.appendChild(ta);
@@ -320,23 +337,31 @@
   }
 
   function canExpand(c){
-    return (currentBlock === 4 && c !== 4) || (currentBlock !== 4 && c === 4);
+    if (c === 4) return !atRoot();
+    return true; // any non-center cell can always drill deeper, to any depth
   }
 
   function expand(c){
-    if (currentBlock === 4 && c !== 4){
-      currentBlock = c;
-    } else if (currentBlock !== 4 && c === 4){
-      currentBlock = 4;
+    if (c === 4){
+      if (atRoot()) return;
+      navPath.pop();
     } else {
-      return;
+      const node = currentNode();
+      if (!node.children[c]) node.children[c] = makeNode();
+      const child = node.children[c];
+      child.cells[4] = node.cells[c];
+      navPath.push({ node: child, idx: c });
     }
     if (document.activeElement) document.activeElement.blur();
     render();
     scheduleSave();
   }
 
-  backBtn.addEventListener('pointerup', () => { currentBlock = 4; render(); scheduleSave(); });
+  backBtn.addEventListener('pointerup', () => {
+    navPath = [navPath[0]];
+    render();
+    scheduleSave();
+  });
 
   // ---- gestures: tap-to-edit, long-press+drag to swap, double-tap to expand ----
   const LONG_PRESS_MS = 380;
@@ -406,11 +431,15 @@
       if (dropTargetEl){
         const j = Number(dropTargetEl.dataset.c);
         const i = dragC;
-        const tmp = grid[currentBlock][i];
-        grid[currentBlock][i] = grid[currentBlock][j];
-        grid[currentBlock][j] = tmp;
-        syncMirror(currentBlock, i);
-        syncMirror(currentBlock, j);
+        const node = currentNode();
+        const tmp = node.cells[i];
+        node.cells[i] = node.cells[j];
+        node.cells[j] = tmp;
+        const tmpChild = node.children[i];
+        node.children[i] = node.children[j];
+        node.children[j] = tmpChild;
+        syncMirror(i);
+        syncMirror(j);
         dropTargetEl.classList.remove('dropTarget');
         dropTargetEl = null;
         render();
@@ -460,17 +489,55 @@
   }
   function saveData(){
     try{
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({ grid, currentBlock }));
+      const path = navPath.slice(1).map((entry) => entry.idx);
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ root, path }));
     }catch(err){ console.error('save failed', err); }
+  }
+  function normalizeNode(raw){
+    const node = makeNode();
+    if (raw && Array.isArray(raw.cells)){
+      for (let i = 0; i < 9; i++){
+        node.cells[i] = typeof raw.cells[i] === 'string' ? raw.cells[i] : '';
+      }
+    }
+    if (raw && Array.isArray(raw.children)){
+      for (let i = 0; i < 9; i++){
+        if (raw.children[i]) node.children[i] = normalizeNode(raw.children[i]);
+      }
+    }
+    return node;
   }
   function loadData(){
     try{
       const raw = localStorage.getItem(STORAGE_KEY);
       if (raw){
         const parsed = JSON.parse(raw);
-        if (parsed && Array.isArray(parsed.grid) && parsed.grid.length === 9){
-          grid = parsed.grid;
-          currentBlock = typeof parsed.currentBlock === 'number' ? parsed.currentBlock : 4;
+        if (parsed && parsed.root){
+          root = normalizeNode(parsed.root);
+          navPath = [{ node: root, idx: null }];
+          if (Array.isArray(parsed.path)){
+            let node = root;
+            for (const idx of parsed.path){
+              if (node.children[idx]){
+                node = node.children[idx];
+                navPath.push({ node, idx });
+              } else break;
+            }
+          }
+        } else if (Array.isArray(parsed.grid) && parsed.grid.length === 9){
+          // migrate from the old flat 9x9 format
+          root = makeNode();
+          root.cells = parsed.grid[4].slice();
+          for (let i = 0; i < 9; i++){
+            if (i === 4) continue;
+            const hasContent = parsed.grid[i].some((v, idx) => idx !== 4 && v);
+            if (hasContent){
+              const child = makeNode();
+              child.cells = parsed.grid[i].slice();
+              root.children[i] = child;
+            }
+          }
+          navPath = [{ node: root, idx: null }];
         }
       }
     }catch(err){ /* fresh start */ }
@@ -490,46 +557,66 @@
 
   function buildExportText(){
     let out = '=== マンダラート ===\n\n';
-    out += `中心ゴール: ${grid[4][4] || '(未入力)'}\n\n`;
-    RING_ORDER.forEach((themeIdx, i) => {
-      const theme = grid[4][themeIdx] || `(未入力)`;
-      out += `◆ テーマ${i + 1}: ${theme}\n`;
-      RING_ORDER.forEach((detailIdx) => {
-        const val = grid[themeIdx][detailIdx];
-        if (val) out += `  ・${val}\n`;
+    out += `中心ゴール: ${root.cells[4] || '(未入力)'}\n\n`;
+    function renderDetails(node, depth){
+      let s = '';
+      RING_ORDER.forEach((idx) => {
+        const val = node.cells[idx];
+        if (val) s += '  '.repeat(depth) + `・${val}\n`;
+        if (node.children[idx]) s += renderDetails(node.children[idx], depth + 1);
       });
+      return s;
+    }
+    RING_ORDER.forEach((themeIdx, i) => {
+      const theme = root.cells[themeIdx] || `(未入力)`;
+      out += `◆ テーマ${i + 1}: ${theme}\n`;
+      if (root.children[themeIdx]) out += renderDetails(root.children[themeIdx], 1);
       out += '\n';
     });
     return out;
   }
 
   function buildMarkdownText(){
-    let out = `# ${grid[4][4] || '目標'}\n\n`;
-    RING_ORDER.forEach((themeIdx, i) => {
-      const theme = grid[4][themeIdx] || `テーマ ${i + 1}`;
-      out += `## ${theme}\n`;
-      RING_ORDER.forEach((detailIdx) => {
-        const val = grid[themeIdx][detailIdx];
-        if (val) out += `- ${val}\n`;
+    let out = `# ${root.cells[4] || '目標'}\n\n`;
+    function renderDetails(node, indent){
+      let s = '';
+      RING_ORDER.forEach((idx) => {
+        const val = node.cells[idx];
+        if (val) s += '  '.repeat(indent) + `- ${val}\n`;
+        if (node.children[idx]) s += renderDetails(node.children[idx], indent + 1);
       });
+      return s;
+    }
+    RING_ORDER.forEach((themeIdx, i) => {
+      const theme = root.cells[themeIdx] || `テーマ ${i + 1}`;
+      out += `## ${theme}\n`;
+      if (root.children[themeIdx]) out += renderDetails(root.children[themeIdx], 0);
       out += '\n';
     });
     return out;
   }
 
   function buildWorkflowyText(){
-    const goal = (grid[4][4] || '').trim();
+    const goal = (root.cells[4] || '').trim();
     let out = `- ${goal || '目標'}\n`;
-    RING_ORDER.forEach((themeIdx, i) => {
-      const theme = (grid[4][themeIdx] || '').trim();
-      const details = RING_ORDER
-        .map((detailIdx) => (grid[themeIdx][detailIdx] || '').trim())
-        .filter(Boolean);
-      if (!theme && details.length === 0) return;
-      out += `  - ${theme || `テーマ ${i + 1}`}\n`;
-      details.forEach((val) => {
-        out += `    - ${val}\n`;
+    function renderDetails(node, depth){
+      let s = '';
+      RING_ORDER.forEach((idx) => {
+        const val = (node.cells[idx] || '').trim();
+        const child = node.children[idx];
+        if (!val && !child) return;
+        s += '  '.repeat(depth) + `- ${val}\n`;
+        if (child) s += renderDetails(child, depth + 1);
       });
+      return s;
+    }
+    RING_ORDER.forEach((themeIdx, i) => {
+      const theme = (root.cells[themeIdx] || '').trim();
+      const child = root.children[themeIdx];
+      const childLines = child ? renderDetails(child, 2) : '';
+      if (!theme && !childLines) return;
+      out += `  - ${theme || `テーマ ${i + 1}`}\n`;
+      out += childLines;
     });
     return out;
   }
@@ -565,25 +652,26 @@
   document.getElementById('resetBtn').addEventListener('pointerup', () => {
     menu.classList.remove('open');
     if (!confirm('すべての内容をクリアします。よろしいですか？')) return;
-    grid = Array.from({length:9}, () => Array(9).fill(''));
-    currentBlock = 4;
+    root = makeNode();
+    navPath = [{ node: root, idx: null }];
     render();
     try{ localStorage.removeItem(STORAGE_KEY); }catch(e){}
   });
 
   // ---- long-text focused writing mode ----
-  function cellLabel(block, c){
-    if (block === 4 && c === 4) return '中心ゴール';
-    if (block === 4) return grid[4][c] ? grid[4][c] : `テーマ ${c + 1}`;
-    if (c === 4) return grid[4][block] ? grid[4][block] : 'テーマに戻る';
+  function cellLabel(c){
+    const node = currentNode();
+    if (atRoot() && c === 4) return '中心ゴール';
+    if (atRoot()) return node.cells[c] ? node.cells[c] : `テーマ ${c + 1}`;
+    if (c === 4) return node.cells[4] ? node.cells[4] : 'テーマに戻る';
     return `詳細 ${c + 1}`;
   }
 
   function openLongText(c){
     if (document.activeElement) document.activeElement.blur();
-    longTextTarget = { block: currentBlock, c: c };
-    ltArea.value = grid[currentBlock][c];
-    ltLabel.textContent = cellLabel(currentBlock, c);
+    longTextTarget = { c: c };
+    ltArea.value = currentNode().cells[c];
+    ltLabel.textContent = cellLabel(c);
     boardEl.style.display = 'none';
     longtextEl.classList.add('show');
     bigBtnMain.textContent = 'グリッドに戻る';
@@ -594,8 +682,8 @@
 
   function closeLongText(){
     if (longTextTarget){
-      grid[longTextTarget.block][longTextTarget.c] = ltArea.value;
-      syncMirror(longTextTarget.block, longTextTarget.c);
+      currentNode().cells[longTextTarget.c] = ltArea.value;
+      syncMirror(longTextTarget.c);
       longTextTarget = null;
       scheduleSave();
     }
@@ -609,8 +697,8 @@
 
   ltArea.addEventListener('input', () => {
     if (!longTextTarget) return;
-    grid[longTextTarget.block][longTextTarget.c] = ltArea.value;
-    syncMirror(longTextTarget.block, longTextTarget.c);
+    currentNode().cells[longTextTarget.c] = ltArea.value;
+    syncMirror(longTextTarget.c);
     scheduleSave();
   });
 
