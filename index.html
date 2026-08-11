@@ -24,6 +24,8 @@
     --accent:#B23A2E;
     --gap: clamp(10px, 3.2vw, 18px);
     --topbar-h: 54px;
+    --cell-font-size: 16px;
+    --cell-font-family: "Zen Kaku Gothic New", -apple-system, BlinkMacSystemFont, sans-serif;
   }
   *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; user-select:none; -webkit-user-select:none; }
   html,body{ height:100%; overscroll-behavior:none; }
@@ -120,19 +122,28 @@
     border-color:var(--accent);
     box-shadow: inset 0 0 0 2px rgba(178,58,46,.35);
   }
-  textarea{
+  textarea, .cell-editor, .lt-editor{
     width:100%; height:100%;
     border:0; resize:none; background:transparent;
-    font-family:inherit; color:var(--ink);
-    font-size: 16px;
+    font-family:var(--cell-font-family); color:var(--ink);
+    font-size: var(--cell-font-size);
     line-height:1.3;
     padding:6px;
     text-align:center;
     outline:none;
-    display:flex; align-items:center;
     user-select:text; -webkit-user-select:text;
   }
-  .cell textarea{
+  .cell-editor{
+    display:flex; align-items:center; justify-content:center;
+    white-space:pre-wrap; word-break:break-word;
+    overflow:hidden;
+  }
+  .cell-editor:empty::before{
+    content:attr(data-placeholder);
+    color:var(--ink-soft);
+    pointer-events:none;
+  }
+  .cell .cell-editor{
     pointer-events:none;
     position:absolute;
     top:50%; left:50%;
@@ -140,7 +151,9 @@
     transform: translate(-50%,-50%) scale(0.75);
     transform-origin:center;
   }
-  .cell.center textarea{ font-weight:700; }
+  .cell.center .cell-editor{ font-weight:700; }
+  .cell-editor b, .cell-editor strong, .lt-editor b, .lt-editor strong{ font-weight:700; }
+  .cell-editor u, .lt-editor u{ text-decoration:underline; }
 
   /* export modal */
   .modal-overlay{
@@ -204,21 +217,58 @@
     text-align:center;
     padding-bottom:10px;
   }
-  .longtext textarea{
+  .longtext .lt-editor{
     flex:1;
     width:100%;
+    height:auto;
     border:0;
-    resize:none;
     background:transparent;
-    font-family:inherit;
+    font-family:var(--cell-font-family);
     color:var(--ink);
-    font-size:16px;
+    font-size:var(--cell-font-size);
     line-height:1.7;
     padding:4px 2px;
     text-align:left;
     outline:none;
     display:block;
+    white-space:pre-wrap;
+    word-break:break-word;
+    overflow:auto;
     user-select:text; -webkit-user-select:text;
+  }
+  .longtext .lt-editor:empty::before{
+    content:attr(data-placeholder);
+    color:var(--ink-soft);
+    pointer-events:none;
+  }
+
+  /* selection format bar */
+  .fmt-bar{
+    position:fixed; z-index:40; display:none;
+    gap:6px; padding:6px; border-radius:10px;
+    background:#2b2b28; box-shadow:0 8px 24px rgba(0,0,0,.22);
+  }
+  .fmt-bar.show{ display:flex; }
+  .fmt-bar button{
+    min-width:40px; height:36px; border:0; border-radius:7px;
+    background:#fff; color:var(--ink); font-family:inherit;
+    font-size:14px; cursor:pointer; padding:0 10px;
+  }
+  .fmt-bar button:active{ background:#f3f1ea; }
+
+  /* style settings */
+  .style-form{ display:flex; flex-direction:column; gap:14px; }
+  .style-row{ display:flex; flex-direction:column; gap:6px; }
+  .style-row label{ font-size:12px; color:var(--ink-soft); }
+  .style-row select{
+    font-family:inherit; font-size:14px; padding:10px 12px;
+    border:1px solid #ddd; border-radius:6px; background:#fff; color:var(--ink);
+  }
+  .style-preview{
+    border:1px solid #eee; border-radius:8px; padding:14px;
+    text-align:center; font-family:var(--cell-font-family);
+    font-size:var(--cell-font-size); line-height:1.4; color:var(--ink);
+    min-height:48px;
   }
 </style>
 </head>
@@ -233,6 +283,7 @@
       <button id="exportBtn">書き出す（テキスト）</button>
       <button id="exportMdBtn">書き出す（Markdown）</button>
       <button id="exportWfBtn">書き出す（Workflowy）</button>
+      <button id="styleBtn">文字スタイル</button>
       <button id="resetBtn">クリア</button>
     </div>
   </div>
@@ -242,8 +293,13 @@
   <div class="board" id="board"></div>
   <div class="longtext" id="longtext">
     <div class="lt-label" id="ltLabel"></div>
-    <textarea id="ltArea" placeholder="ここに自由に書けます"></textarea>
+    <div class="lt-editor" id="ltArea" contenteditable="true" data-placeholder="ここに自由に書けます"></div>
   </div>
+</div>
+
+<div class="fmt-bar" id="fmtBar">
+  <button type="button" id="fmtBold" aria-label="太字"><b>B</b></button>
+  <button type="button" id="fmtUnderline" aria-label="下線"><u>U</u></button>
 </div>
 
 <div class="bottombar">
@@ -264,9 +320,78 @@
   </div>
 </div>
 
+<div class="modal-overlay" id="styleOverlay">
+  <div class="modal">
+    <h2>文字スタイル</h2>
+    <div class="style-form">
+      <div class="style-row">
+        <label for="fontSizeSelect">基本サイズ</label>
+        <select id="fontSizeSelect">
+          <option value="12">12</option>
+          <option value="14">14</option>
+          <option value="16" selected>16</option>
+          <option value="18">18</option>
+          <option value="20">20</option>
+          <option value="22">22</option>
+          <option value="24">24</option>
+        </select>
+      </div>
+      <div class="style-row">
+        <label for="fontFamilySelect">フォント</label>
+        <select id="fontFamilySelect">
+          <option value="gothic" selected>ゴシック（Zen Kaku）</option>
+          <option value="mincho">明朝（Shippori）</option>
+          <option value="system">システム</option>
+        </select>
+      </div>
+      <div class="style-preview" id="stylePreview">あいうえお ABC 123</div>
+    </div>
+    <div class="modal-actions">
+      <button id="closeStyleBtn" class="primary">閉じる</button>
+    </div>
+  </div>
+</div>
+
 <script>
 (function(){
   const STORAGE_KEY = 'mandalart:state';
+  const STYLE_KEY = 'mandalart:style';
+
+  const FONT_FAMILIES = {
+    gothic: '"Zen Kaku Gothic New", -apple-system, BlinkMacSystemFont, sans-serif',
+    mincho: '"Shippori Mincho", "Hiragino Mincho ProN", serif',
+    system: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif'
+  };
+
+  let styleSettings = { size: 16, family: 'gothic' };
+
+  function applyStyleSettings(){
+    const rootStyle = document.documentElement.style;
+    rootStyle.setProperty('--cell-font-size', styleSettings.size + 'px');
+    rootStyle.setProperty('--cell-font-family', FONT_FAMILIES[styleSettings.family] || FONT_FAMILIES.gothic);
+    const sizeSelect = document.getElementById('fontSizeSelect');
+    const familySelect = document.getElementById('fontFamilySelect');
+    if (sizeSelect) sizeSelect.value = String(styleSettings.size);
+    if (familySelect) familySelect.value = styleSettings.family;
+  }
+
+  function saveStyleSettings(){
+    try{ localStorage.setItem(STYLE_KEY, JSON.stringify(styleSettings)); }catch(e){}
+  }
+
+  function loadStyleSettings(){
+    try{
+      const raw = localStorage.getItem(STYLE_KEY);
+      if (raw){
+        const parsed = JSON.parse(raw);
+        const size = Number(parsed && parsed.size);
+        const family = parsed && parsed.family;
+        if ([12,14,16,18,20,22,24].includes(size)) styleSettings.size = size;
+        if (FONT_FAMILIES[family]) styleSettings.family = family;
+      }
+    }catch(e){}
+    applyStyleSettings();
+  }
 
   // Each node is one 3x3 board (9 cells, index 4 = center). Non-center cells can be
   // expanded into a child node (created lazily), which itself can be expanded further,
@@ -292,7 +417,137 @@
   const bigBtn = document.getElementById('bigBtn');
   const bigBtnMain = document.getElementById('bigBtnMain');
   const bigBtnSub = document.getElementById('bigBtnSub');
+  const fmtBar = document.getElementById('fmtBar');
   let longTextTarget = null; // { c } or null
+
+  // ---- rich text helpers (cells store HTML; plain text still works) ----
+  const ALLOWED_TAGS = /^(B|STRONG|U|BR|DIV|SPAN|P)$/i;
+  function plainText(html){
+    if (!html) return '';
+    const d = document.createElement('div');
+    d.innerHTML = html;
+    return (d.innerText || d.textContent || '').replace(/\u00a0/g, ' ');
+  }
+  function looksLikeHtml(s){
+    return /<[a-z][\s\S]*>/i.test(s || '');
+  }
+  function sanitizeHtml(html){
+    const d = document.createElement('div');
+    d.innerHTML = html || '';
+    (function walk(node){
+      const kids = Array.from(node.childNodes);
+      kids.forEach((child) => {
+        if (child.nodeType === 1){
+          if (!ALLOWED_TAGS.test(child.tagName)){
+            while (child.firstChild) node.insertBefore(child.firstChild, child);
+            node.removeChild(child);
+          } else {
+            while (child.attributes.length) child.removeAttribute(child.attributes[0].name);
+            walk(child);
+          }
+        }
+      });
+    })(d);
+    return d.innerHTML;
+  }
+  function setEditorContent(el, raw){
+    if (!raw){ el.innerHTML = ''; return; }
+    if (looksLikeHtml(raw)) el.innerHTML = sanitizeHtml(raw);
+    else el.textContent = raw;
+  }
+  function getEditorContent(el){
+    const text = plainText(el.innerHTML).trim();
+    if (!text) return '';
+    return sanitizeHtml(el.innerHTML);
+  }
+  function htmlToMarkdownInline(html){
+    const d = document.createElement('div');
+    d.innerHTML = sanitizeHtml(html || '');
+    function walk(node){
+      let out = '';
+      node.childNodes.forEach((child) => {
+        if (child.nodeType === 3){
+          out += child.nodeValue;
+        } else if (child.nodeType === 1){
+          const tag = child.tagName.toUpperCase();
+          const inner = walk(child);
+          if (tag === 'B' || tag === 'STRONG') out += '**' + inner + '**';
+          else if (tag === 'U') out += '<u>' + inner + '</u>';
+          else if (tag === 'BR') out += '\n';
+          else if (tag === 'DIV' || tag === 'P') out += (out && !out.endsWith('\n') ? '\n' : '') + inner;
+          else out += inner;
+        }
+      });
+      return out;
+    }
+    return walk(d).replace(/\n+$/, '');
+  }
+  function cellDisplay(html){
+    return plainText(html).trim();
+  }
+
+  // ---- selection format bar ----
+  let savedRange = null;
+  function isOurEditor(el){
+    return !!(el && (el.classList.contains('cell-editor') || el.classList.contains('lt-editor')));
+  }
+  function getSelectionInEditor(){
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return null;
+    const range = sel.getRangeAt(0);
+    const node = range.commonAncestorContainer;
+    const el = node.nodeType === 1 ? node : node.parentElement;
+    const editor = el ? el.closest('.cell-editor, .lt-editor') : null;
+    if (!editor || !isOurEditor(editor)) return null;
+    return { sel, range, editor };
+  }
+  function hideFmtBar(){ fmtBar.classList.remove('show'); }
+  function showFmtBarNearSelection(){
+    const info = getSelectionInEditor();
+    if (!info){ hideFmtBar(); return; }
+    savedRange = info.range.cloneRange();
+    const rect = info.range.getBoundingClientRect();
+    if (!rect.width && !rect.height){ hideFmtBar(); return; }
+    fmtBar.classList.add('show');
+    const barW = fmtBar.offsetWidth || 100;
+    const barH = fmtBar.offsetHeight || 48;
+    let left = rect.left + rect.width / 2 - barW / 2;
+    let top = rect.top - barH - 8;
+    if (top < 8) top = rect.bottom + 8;
+    left = Math.max(8, Math.min(left, window.innerWidth - barW - 8));
+    fmtBar.style.left = left + 'px';
+    fmtBar.style.top = top + 'px';
+  }
+  function restoreSelection(){
+    if (!savedRange) return;
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(savedRange);
+  }
+  function applyFormat(cmd){
+    restoreSelection();
+    try{ document.execCommand(cmd, false, null); }catch(e){}
+    const info = getSelectionInEditor();
+    if (info){
+      const editor = info.editor;
+      editor.dispatchEvent(new Event('input', { bubbles: true }));
+      savedRange = window.getSelection().rangeCount ? window.getSelection().getRangeAt(0).cloneRange() : savedRange;
+    }
+    showFmtBarNearSelection();
+  }
+  document.addEventListener('selectionchange', () => {
+    // delay slightly so iOS selection UI settles
+    clearTimeout(showFmtBarNearSelection._t);
+    showFmtBarNearSelection._t = setTimeout(showFmtBarNearSelection, 80);
+  });
+  document.getElementById('fmtBold').addEventListener('pointerdown', (e) => {
+    e.preventDefault(); e.stopPropagation();
+    applyFormat('bold');
+  });
+  document.getElementById('fmtUnderline').addEventListener('pointerdown', (e) => {
+    e.preventDefault(); e.stopPropagation();
+    applyFormat('underline');
+  });
 
   // Keeps a cell's text in sync with the node it opens into (and the node it came from).
   function syncMirror(c){
@@ -395,11 +650,11 @@
     // title / back button
     if (atRoot()){
       backBtn.classList.remove('show');
-      titleEl.textContent = node.cells[4] ? node.cells[4] : 'マンダラート';
+      titleEl.textContent = cellDisplay(node.cells[4]) || 'マンダラート';
     } else {
       backBtn.classList.add('show');
       const idx = navPath[navPath.length - 1].idx;
-      titleEl.textContent = node.cells[4] ? node.cells[4] : 'テーマ ' + (idx + 1);
+      titleEl.textContent = cellDisplay(node.cells[4]) || 'テーマ ' + (idx + 1);
     }
 
     boardEl.innerHTML = '';
@@ -408,13 +663,17 @@
       cellEl.className = 'cell' + (c === 4 ? ' center' : '');
       cellEl.dataset.c = c;
 
-      const ta = document.createElement('textarea');
-      ta.value = node.cells[c];
-      ta.setAttribute('placeholder', (atRoot() && c === 4) ? '目標' : '');
+      const ta = document.createElement('div');
+      ta.className = 'cell-editor';
+      ta.contentEditable = 'true';
+      ta.setAttribute('role', 'textbox');
+      ta.setAttribute('aria-multiline', 'true');
+      if (atRoot() && c === 4) ta.setAttribute('data-placeholder', '目標');
+      setEditorContent(ta, node.cells[c]);
       ta.addEventListener('input', () => {
-        node.cells[c] = ta.value;
+        node.cells[c] = getEditorContent(ta);
         syncMirror(c);
-        if (atRoot() && c === 4){ titleEl.textContent = ta.value || 'マンダラート'; }
+        if (atRoot() && c === 4){ titleEl.textContent = cellDisplay(node.cells[c]) || 'マンダラート'; }
         scheduleSave();
       });
       cellEl.appendChild(ta);
@@ -440,6 +699,7 @@
       navPath.push({ node: child, idx: c });
     }
     if (document.activeElement) document.activeElement.blur();
+    hideFmtBar();
     render();
     scheduleSave();
   }
@@ -635,18 +895,18 @@
 
   function buildExportText(){
     let out = '=== マンダラート ===\n\n';
-    out += `中心ゴール: ${root.cells[4] || '(未入力)'}\n\n`;
+    out += `中心ゴール: ${cellDisplay(root.cells[4]) || '(未入力)'}\n\n`;
     function renderDetails(node, depth){
       let s = '';
       RING_ORDER.forEach((idx) => {
-        const val = node.cells[idx];
+        const val = cellDisplay(node.cells[idx]);
         if (val) s += '  '.repeat(depth) + `・${val}\n`;
         if (node.children[idx]) s += renderDetails(node.children[idx], depth + 1);
       });
       return s;
     }
     RING_ORDER.forEach((themeIdx, i) => {
-      const theme = root.cells[themeIdx] || `(未入力)`;
+      const theme = cellDisplay(root.cells[themeIdx]) || `(未入力)`;
       out += `◆ テーマ${i + 1}: ${theme}\n`;
       if (root.children[themeIdx]) out += renderDetails(root.children[themeIdx], 1);
       out += '\n';
@@ -655,18 +915,18 @@
   }
 
   function buildMarkdownText(){
-    let out = `# ${root.cells[4] || '目標'}\n\n`;
+    let out = `# ${htmlToMarkdownInline(root.cells[4]) || '目標'}\n\n`;
     function renderDetails(node, indent){
       let s = '';
       RING_ORDER.forEach((idx) => {
-        const val = node.cells[idx];
+        const val = htmlToMarkdownInline(node.cells[idx]);
         if (val) s += '  '.repeat(indent) + `- ${val}\n`;
         if (node.children[idx]) s += renderDetails(node.children[idx], indent + 1);
       });
       return s;
     }
     RING_ORDER.forEach((themeIdx, i) => {
-      const theme = root.cells[themeIdx] || `テーマ ${i + 1}`;
+      const theme = htmlToMarkdownInline(root.cells[themeIdx]) || `テーマ ${i + 1}`;
       out += `## ${theme}\n`;
       if (root.children[themeIdx]) out += renderDetails(root.children[themeIdx], 0);
       out += '\n';
@@ -675,12 +935,12 @@
   }
 
   function buildWorkflowyText(){
-    const goal = (root.cells[4] || '').trim();
+    const goal = cellDisplay(root.cells[4]);
     let out = `- ${goal || '目標'}\n`;
     function renderDetails(node, depth){
       let s = '';
       RING_ORDER.forEach((idx) => {
-        const val = (node.cells[idx] || '').trim();
+        const val = cellDisplay(node.cells[idx]);
         const child = node.children[idx];
         if (!val && !child) return;
         s += '  '.repeat(depth) + `- ${val}\n`;
@@ -689,7 +949,7 @@
       return s;
     }
     RING_ORDER.forEach((themeIdx, i) => {
-      const theme = (root.cells[themeIdx] || '').trim();
+      const theme = cellDisplay(root.cells[themeIdx]);
       const child = root.children[themeIdx];
       const childLines = child ? renderDetails(child, 2) : '';
       if (!theme && !childLines) return;
@@ -716,6 +976,26 @@
   });
   document.getElementById('closeModalBtn').addEventListener('pointerup', () => overlay.classList.remove('open'));
   overlay.addEventListener('pointerup', (e) => { if (e.target === overlay) overlay.classList.remove('open'); });
+
+  const styleOverlay = document.getElementById('styleOverlay');
+  document.getElementById('styleBtn').addEventListener('pointerup', () => {
+    menu.classList.remove('open');
+    applyStyleSettings();
+    styleOverlay.classList.add('open');
+  });
+  document.getElementById('closeStyleBtn').addEventListener('pointerup', () => styleOverlay.classList.remove('open'));
+  styleOverlay.addEventListener('pointerup', (e) => { if (e.target === styleOverlay) styleOverlay.classList.remove('open'); });
+  document.getElementById('fontSizeSelect').addEventListener('change', (e) => {
+    styleSettings.size = Number(e.target.value) || 16;
+    applyStyleSettings();
+    saveStyleSettings();
+  });
+  document.getElementById('fontFamilySelect').addEventListener('change', (e) => {
+    styleSettings.family = FONT_FAMILIES[e.target.value] ? e.target.value : 'gothic';
+    applyStyleSettings();
+    saveStyleSettings();
+  });
+
   document.getElementById('copyBtn').addEventListener('pointerup', async () => {
     try{
       await navigator.clipboard.writeText(exportArea.value);
@@ -740,15 +1020,15 @@
   function cellLabel(c){
     const node = currentNode();
     if (atRoot() && c === 4) return '中心ゴール';
-    if (atRoot()) return node.cells[c] ? node.cells[c] : `テーマ ${c + 1}`;
-    if (c === 4) return node.cells[4] ? node.cells[4] : 'テーマに戻る';
+    if (atRoot()) return cellDisplay(node.cells[c]) || `テーマ ${c + 1}`;
+    if (c === 4) return cellDisplay(node.cells[4]) || 'テーマに戻る';
     return `詳細 ${c + 1}`;
   }
 
   function openLongText(c){
     if (document.activeElement) document.activeElement.blur();
     longTextTarget = { c: c };
-    ltArea.value = currentNode().cells[c];
+    setEditorContent(ltArea, currentNode().cells[c]);
     ltLabel.textContent = cellLabel(c);
     boardEl.style.display = 'none';
     longtextEl.classList.add('show');
@@ -760,11 +1040,12 @@
 
   function closeLongText(){
     if (longTextTarget){
-      currentNode().cells[longTextTarget.c] = ltArea.value;
+      currentNode().cells[longTextTarget.c] = getEditorContent(ltArea);
       syncMirror(longTextTarget.c);
       longTextTarget = null;
       scheduleSave();
     }
+    hideFmtBar();
     longtextEl.classList.remove('show');
     boardEl.style.display = '';
     bigBtnMain.textContent = '長文モード';
@@ -775,7 +1056,7 @@
 
   ltArea.addEventListener('input', () => {
     if (!longTextTarget) return;
-    currentNode().cells[longTextTarget.c] = ltArea.value;
+    currentNode().cells[longTextTarget.c] = getEditorContent(ltArea);
     syncMirror(longTextTarget.c);
     scheduleSave();
   });
@@ -824,12 +1105,15 @@
   });
 
   document.addEventListener('pointerdown', (e) => {
+    if (e.target.closest('.fmt-bar')) return;
     const active = document.activeElement;
-    if (active && active.tagName === 'TEXTAREA' && boardEl.contains(active) && !e.target.closest('.cell')){
+    if (active && active.classList && active.classList.contains('cell-editor') && boardEl.contains(active) && !e.target.closest('.cell')){
       active.blur();
+      hideFmtBar();
     }
   });
 
+  loadStyleSettings();
   loadData();
   function sizeBoard(){
     const stage = document.querySelector('.stage');
