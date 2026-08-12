@@ -285,6 +285,14 @@
     font-size:var(--cell-font-size); line-height:1.4; color:var(--ink);
     min-height:48px;
   }
+
+  .paste-area{
+    width:100%; min-height:220px; font-size:14px; padding:10px;
+    border:1px solid #ddd; border-radius:6px; text-align:left;
+    color:var(--ink); resize:vertical; font-family:ui-monospace, SFMono-Regular, Menlo, monospace;
+    line-height:1.45; user-select:text; -webkit-user-select:text;
+  }
+  .paste-hint{ font-size:12px; color:var(--ink-soft); line-height:1.45; margin:0; }
 </style>
 </head>
 <body>
@@ -298,6 +306,7 @@
       <button id="exportBtn">書き出す（テキスト）</button>
       <button id="exportMdBtn">書き出す（Markdown）</button>
       <button id="exportWfBtn">書き出す（Workflowy）</button>
+      <button id="importOutlineBtn">アウトラインを取り込む</button>
       <button id="styleBtn">文字スタイル</button>
       <button id="resetBtn">クリア</button>
     </div>
@@ -370,6 +379,18 @@
   </div>
 </div>
 
+<div class="modal-overlay" id="pasteOverlay">
+  <div class="modal">
+    <h2>アウトラインを取り込む</h2>
+    <p class="paste-hint" id="pasteHint">選択中のセルを親として、Workflowy形式（ネストした - リスト）を取り込みます。</p>
+    <textarea class="paste-area" id="pasteArea" placeholder="- 親&#10;  - 子1&#10;  - 子2&#10;    - 孫"></textarea>
+    <div class="modal-actions">
+      <button id="cancelPasteBtn">キャンセル</button>
+      <button class="primary" id="runPasteBtn">取り込む</button>
+    </div>
+  </div>
+</div>
+
 <script>
 (function(){
   const STORAGE_KEY = 'mandalart:state';
@@ -437,6 +458,7 @@
   const bigBtnSub = document.getElementById('bigBtnSub');
   const fmtBar = document.getElementById('fmtBar');
   let longTextTarget = null; // { c } or null
+  let lastFocusedCellC = null; // last cell the user focused for outline import
 
   // ---- rich text helpers (cells store HTML; plain text still works) ----
   const ALLOWED_TAGS = /^(B|STRONG|U|BR|DIV|SPAN|P)$/i;
@@ -714,6 +736,7 @@
       ta.setAttribute('aria-multiline', 'true');
       if (atRoot() && c === 4) ta.setAttribute('data-placeholder', '目標');
       setEditorContent(ta, node.cells[c]);
+      ta.addEventListener('focus', () => { lastFocusedCellC = c; });
       ta.addEventListener('input', () => {
         node.cells[c] = getEditorContent(ta);
         syncMirror(c);
@@ -954,6 +977,210 @@
   // top-left, top-mid, top-right, mid-right, bottom-right (starts at 6 o'clock, sweeps around)
   const RING_ORDER = [7, 6, 3, 0, 1, 2, 5, 8];
 
+  // ---- outline import (Workflowy-style nested "- " lists) ----
+  function cleanOutlineText(s){
+    return String(s || '')
+      .replace(/\*\*(.*?)\*\*/g, '$1')
+      .replace(/__(.*?)__/g, '$1')
+      .replace(/<\/?u>/gi, '')
+      .replace(/<[^>]+>/g, '')
+      .replace(/\u00a0/g, ' ')
+      .trim();
+  }
+
+  function parseOutlineText(text){
+    const lines = String(text || '').split(/\r?\n/);
+    const items = [];
+    for (const raw of lines){
+      if (!raw.trim()) continue;
+      const m = raw.match(/^([ \t]*)([-*•]|\d+[.)])\s+(.*)$/);
+      if (!m) continue;
+      const indent = m[1].replace(/\t/g, '  ').length;
+      items.push({ indent, text: cleanOutlineText(m[3]) });
+    }
+    if (!items.length) return [];
+
+    // infer indent unit from the smallest positive indent step
+    let unit = 2;
+    const indents = [...new Set(items.map((it) => it.indent))].sort((a, b) => a - b);
+    for (let i = 1; i < indents.length; i++){
+      const step = indents[i] - indents[i - 1];
+      if (step > 0){ unit = step; break; }
+    }
+    const minIndent = indents[0];
+    items.forEach((it) => {
+      it.depth = Math.round((it.indent - minIndent) / unit);
+    });
+
+    const forest = [];
+    const stack = [{ depth: -1, children: forest }];
+    items.forEach((it) => {
+      while (stack.length && stack[stack.length - 1].depth >= it.depth) stack.pop();
+      const parent = stack[stack.length - 1];
+      const node = { text: it.text, children: [] };
+      parent.children.push(node);
+      stack.push({ depth: it.depth, children: node.children, node });
+    });
+    return forest;
+  }
+
+  function findOverfullNodes(nodes, path){
+    const hits = [];
+    (nodes || []).forEach((n, i) => {
+      const label = n.text || `(無題${i + 1})`;
+      const here = path ? path + ' > ' + label : label;
+      if ((n.children || []).length > 8) hits.push({ path: here, count: n.children.length });
+      hits.push(...findOverfullNodes(n.children, here));
+    });
+    return hits;
+  }
+
+  function boardFromOutlineChildren(centerText, children){
+    const board = makeNode();
+    board.cells[4] = centerText || '';
+    (children || []).slice(0, 8).forEach((kid, i) => {
+      const idx = RING_ORDER[i];
+      board.cells[idx] = kid.text || '';
+      if (kid.children && kid.children.length){
+        board.children[idx] = boardFromOutlineChildren(kid.text || '', kid.children);
+      }
+    });
+    return board;
+  }
+
+  function clearOuterCells(node){
+    RING_ORDER.forEach((idx) => {
+      node.cells[idx] = '';
+      node.children[idx] = null;
+    });
+  }
+
+  function applyOutlineToFocusedCell(cellC, forest){
+    if (!forest.length) throw new Error('アウトライン形式の行が見つかりません（"- 項目" の形で貼ってください）');
+
+    const overfull = findOverfullNodes(forest, '');
+    if (overfull.length){
+      const sample = overfull.slice(0, 3).map((h) => `・${h.path}（${h.count}個）`).join('\n');
+      const more = overfull.length > 3 ? `\n…ほか${overfull.length - 3}件` : '';
+      const ok = confirm(
+        `子階層が8つを超える項目があります。先頭の8つだけ取り込みます。\n\n${sample}${more}\n\n続けますか？`
+      );
+      if (!ok) return false;
+    }
+
+    let rootOutline;
+    if (forest.length === 1){
+      rootOutline = forest[0];
+    } else {
+      // multiple top-level bullets become children of the focused cell
+      rootOutline = {
+        text: cellDisplay(currentNode().cells[cellC]),
+        children: forest
+      };
+    }
+
+    const node = currentNode();
+    const centerText = rootOutline.text || '';
+    node.cells[cellC] = centerText;
+
+    if (cellC === 4){
+      // center cell: children fill this board's outer ring
+      clearOuterCells(node);
+      (rootOutline.children || []).slice(0, 8).forEach((kid, i) => {
+        const idx = RING_ORDER[i];
+        node.cells[idx] = kid.text || '';
+        node.children[idx] = (kid.children && kid.children.length)
+          ? boardFromOutlineChildren(kid.text || '', kid.children)
+          : null;
+      });
+    } else {
+      // non-center: children live in a nested board under this cell
+      node.children[cellC] = (rootOutline.children && rootOutline.children.length)
+        ? boardFromOutlineChildren(centerText, rootOutline.children)
+        : null;
+    }
+
+    syncMirror(cellC);
+    return true;
+  }
+
+  function targetCellForImport(){
+    if (longTextTarget) return longTextTarget.c;
+    if (typeof lastFocusedCellC === 'number') return lastFocusedCellC;
+    return null;
+  }
+
+  function cellRoleLabel(c){
+    if (c === 4) return atRoot() ? '中心ゴール' : 'この階層の中心';
+    return atRoot() ? `テーマ位置 ${c + 1}` : `詳細位置 ${c + 1}`;
+  }
+
+  const pasteOverlay = document.getElementById('pasteOverlay');
+  const pasteArea = document.getElementById('pasteArea');
+  const pasteHint = document.getElementById('pasteHint');
+
+  async function openPasteModal(){
+    menu.classList.remove('open');
+    const c = targetCellForImport();
+    if (c === null){
+      alert('先にセルをタップしてカーソルを入れてから、もう一度実行してください。');
+      return;
+    }
+    pasteHint.textContent = `取り込み先: ${cellRoleLabel(c)}（このセルを親として階層を展開します）`;
+    pasteArea.value = '';
+    pasteOverlay.classList.add('open');
+    try{
+      const clip = await navigator.clipboard.readText();
+      if (clip && clip.trim()) pasteArea.value = clip;
+    }catch(e){ /* user can paste manually */ }
+    setTimeout(() => pasteArea.focus(), 50);
+  }
+
+  function closePasteModal(){ pasteOverlay.classList.remove('open'); }
+
+  function runOutlineImport(){
+    const c = targetCellForImport();
+    if (c === null){
+      alert('取り込み先のセルが不明です。セルを選択し直してください。');
+      return;
+    }
+    let forest;
+    try{
+      forest = parseOutlineText(pasteArea.value);
+    }catch(e){
+      alert(e.message || '解析に失敗しました');
+      return;
+    }
+    if (!forest.length){
+      alert('アウトライン形式の行が見つかりません。\n例:\n- 親\n  - 子1\n  - 子2');
+      return;
+    }
+
+    const node = currentNode();
+    const hasExisting = cellDisplay(node.cells[c]) || RING_ORDER.some((idx) => {
+      if (c === 4) return cellDisplay(node.cells[idx]) || node.children[idx];
+      return false;
+    }) || (c !== 4 && node.children[c]);
+    if (hasExisting){
+      if (!confirm('選択中のセル（とその下の階層）の内容を上書きします。よろしいですか？')) return;
+    }
+
+    try{
+      const ok = applyOutlineToFocusedCell(c, forest);
+      if (!ok) return;
+    }catch(e){
+      alert(e.message || '取り込みに失敗しました');
+      return;
+    }
+
+    if (longTextTarget && longTextTarget.c === c){
+      setEditorContent(ltArea, currentNode().cells[c]);
+    }
+    closePasteModal();
+    render();
+    scheduleSave();
+  }
+
   function buildExportText(){
     let out = '=== マンダラート ===\n\n';
     out += `中心ゴール: ${cellDisplay(root.cells[4]) || '(未入力)'}\n\n`;
@@ -1035,6 +1262,12 @@
     exportArea.value = buildWorkflowyText();
     overlay.classList.add('open');
   });
+  document.getElementById('importOutlineBtn').addEventListener('pointerup', () => {
+    openPasteModal();
+  });
+  document.getElementById('runPasteBtn').addEventListener('pointerup', () => runOutlineImport());
+  document.getElementById('cancelPasteBtn').addEventListener('pointerup', () => closePasteModal());
+  pasteOverlay.addEventListener('pointerup', (e) => { if (e.target === pasteOverlay) closePasteModal(); });
   document.getElementById('closeModalBtn').addEventListener('pointerup', () => overlay.classList.remove('open'));
   overlay.addEventListener('pointerup', (e) => { if (e.target === overlay) overlay.classList.remove('open'); });
 
@@ -1089,6 +1322,7 @@
   function openLongText(c){
     if (document.activeElement) document.activeElement.blur();
     longTextTarget = { c: c };
+    lastFocusedCellC = c;
     setEditorContent(ltArea, currentNode().cells[c]);
     ltLabel.textContent = cellLabel(c);
     boardEl.style.display = 'none';
