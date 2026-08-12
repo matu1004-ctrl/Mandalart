@@ -23,9 +23,10 @@
     --radius:10px;
     --accent:#B23A2E;
     --gap: clamp(10px, 3.2vw, 18px);
-    --topbar-h: 54px;
+    --topbar-h: 64px;
     --cell-font-size: 16px;
     --cell-font-family: "Zen Kaku Gothic New", -apple-system, BlinkMacSystemFont, sans-serif;
+    --ui-font-size: 36px;
   }
   *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; user-select:none; -webkit-user-select:none; }
   html,body{ height:100%; overscroll-behavior:none; }
@@ -67,18 +68,21 @@
   }
   .menuWrap{ position:relative; }
   .menuBtn{
-    width:40px; height:40px; border:0; background:none; font-size:20px;
+    min-width:52px; height:52px; border:0; background:none;
+    font-size:var(--ui-font-size); line-height:1;
     color:var(--ink); cursor:pointer;
+    display:flex; align-items:center; justify-content:center;
+    padding:0 6px;
   }
   .menu{
-    position:absolute; top:44px; right:4px; background:#fff; border:1px solid #e2e2e2;
-    border-radius:8px; box-shadow:0 6px 20px rgba(0,0,0,.12); overflow:hidden;
-    display:none; min-width:150px; z-index:20;
+    position:absolute; top:56px; right:4px; background:#fff; border:1px solid #e2e2e2;
+    border-radius:10px; box-shadow:0 6px 20px rgba(0,0,0,.12); overflow:hidden;
+    display:none; min-width:min(92vw, 420px); z-index:20;
   }
   .menu.open{ display:block; }
   .menu button{
-    display:block; width:100%; text-align:left; padding:11px 14px; border:0; background:none;
-    font-family:inherit; font-size:13.5px; color:var(--ink); cursor:pointer;
+    display:block; width:100%; text-align:left; padding:14px 16px; border:0; background:none;
+    font-family:inherit; font-size:var(--ui-font-size); line-height:1.25; color:var(--ink); cursor:pointer;
   }
   .menu button:active{ background:#f3f1ea; }
   .menu button + button{ border-top:1px solid #eee; }
@@ -145,6 +149,17 @@
     pointer-events:none;
     overflow:hidden;
   }
+  .cell-placeholder{
+    position:absolute; inset:0;
+    display:flex; align-items:center; justify-content:center;
+    color:var(--ink-soft);
+    font-family:var(--cell-font-family);
+    font-size:var(--cell-font-size);
+    pointer-events:none;
+    z-index:0;
+  }
+  .cell-editor-wrap.is-filled .cell-placeholder,
+  .cell-editor-wrap.is-focused .cell-placeholder{ display:none; }
   .cell-editor{
     display:block;
     position:absolute;
@@ -155,17 +170,18 @@
     box-sizing:border-box;
     white-space:pre-wrap;
     word-break:break-word;
-    overflow:hidden;
+    overflow-y:auto;
+    overflow-x:hidden;
     text-align:center;
-    /* keep caret usable even when empty */
     min-height:100%;
-  }
-  .cell-editor:empty::before{
-    content:attr(data-placeholder);
-    color:var(--ink-soft);
-    pointer-events:none;
+    z-index:1;
+    touch-action:auto;
+    -webkit-user-select:text;
+    user-select:text;
   }
   .cell .cell-editor{ pointer-events:none; }
+  .cell.editing{ touch-action:auto; }
+  .cell.editing .cell-editor{ pointer-events:auto; }
   .cell.center .cell-editor{ font-weight:700; }
   .cell-editor b, .cell-editor strong, .lt-editor b, .lt-editor strong{ font-weight:700; }
   .cell-editor u, .lt-editor u{ text-decoration:underline; }
@@ -459,6 +475,8 @@
   const fmtBar = document.getElementById('fmtBar');
   let longTextTarget = null; // { c } or null
   let lastFocusedCellC = null; // last cell the user focused for outline import
+  let importTargetC = null; // locked when paste modal opens
+  let lastPasteText = ''; // remember last imported outline for easy re-paste
 
   // ---- rich text helpers (cells store HTML; plain text still works) ----
   const ALLOWED_TAGS = /^(B|STRONG|U|BR|DIV|SPAN|P)$/i;
@@ -729,17 +747,55 @@
       const wrap = document.createElement('div');
       wrap.className = 'cell-editor-wrap';
 
+      const placeholderText = (atRoot() && c === 4) ? '目標' : '';
+      if (placeholderText){
+        const ph = document.createElement('div');
+        ph.className = 'cell-placeholder';
+        ph.textContent = placeholderText;
+        wrap.appendChild(ph);
+      }
+
       const ta = document.createElement('div');
       ta.className = 'cell-editor';
       ta.contentEditable = 'true';
+      ta.style.pointerEvents = 'none';
       ta.setAttribute('role', 'textbox');
       ta.setAttribute('aria-multiline', 'true');
-      if (atRoot() && c === 4) ta.setAttribute('data-placeholder', '目標');
+      ta.setAttribute('inputmode', 'text');
       setEditorContent(ta, node.cells[c]);
-      ta.addEventListener('focus', () => { lastFocusedCellC = c; });
+      if (cellDisplay(node.cells[c])) wrap.classList.add('is-filled');
+
+      const syncFillState = () => {
+        if (cellDisplay(getEditorContent(ta)) || (ta.textContent || '').trim()) wrap.classList.add('is-filled');
+        else wrap.classList.remove('is-filled');
+      };
+
+      ta.addEventListener('focus', () => {
+        lastFocusedCellC = c;
+        wrap.classList.add('is-focused');
+        cellEl.classList.add('editing');
+        ta.style.pointerEvents = 'auto';
+        try{
+          const sel = window.getSelection();
+          if (sel && !(ta.textContent || '').trim()){
+            const range = document.createRange();
+            range.selectNodeContents(ta);
+            range.collapse(true);
+            sel.removeAllRanges();
+            sel.addRange(range);
+          }
+        }catch(e){}
+      });
+      ta.addEventListener('blur', () => {
+        wrap.classList.remove('is-focused');
+        cellEl.classList.remove('editing');
+        ta.style.pointerEvents = 'none';
+        syncFillState();
+      });
       ta.addEventListener('input', () => {
         node.cells[c] = getEditorContent(ta);
         syncMirror(c);
+        syncFillState();
         if (atRoot() && c === 4){ titleEl.textContent = cellDisplay(node.cells[c]) || 'マンダラート'; }
         scheduleSave();
       });
@@ -806,23 +862,7 @@
   });
 
   function attachGestures(cellEl, ta, c){
-    ta.style.pointerEvents = 'none';
-    ta.addEventListener('focus', () => {
-      ta.style.pointerEvents = 'auto';
-      // iOS: empty contenteditable sometimes needs an explicit caret
-      try{
-        const sel = window.getSelection();
-        if (sel && !ta.textContent){
-          const range = document.createRange();
-          range.selectNodeContents(ta);
-          range.collapse(true);
-          sel.removeAllRanges();
-          sel.addRange(range);
-        }
-      }catch(e){}
-    });
-    ta.addEventListener('blur', () => { ta.style.pointerEvents = 'none'; });
-
+    // focus/blur pointer-events are handled in render()'s listeners
     let lpTimer = null;
     let lpReady = false;
     let startX = 0, startY = 0;
@@ -1126,27 +1166,38 @@
       alert('先にセルをタップしてカーソルを入れてから、もう一度実行してください。');
       return;
     }
+    importTargetC = c;
+    lastFocusedCellC = c;
     pasteHint.textContent = `取り込み先: ${cellRoleLabel(c)}（このセルを親として階層を展開します）`;
     pasteArea.value = '';
     pasteOverlay.classList.add('open');
     try{
       const clip = await navigator.clipboard.readText();
       if (clip && clip.trim()) pasteArea.value = clip;
-    }catch(e){ /* user can paste manually */ }
-    setTimeout(() => pasteArea.focus(), 50);
+      else if (lastPasteText) pasteArea.value = lastPasteText;
+    }catch(e){
+      if (lastPasteText) pasteArea.value = lastPasteText;
+    }
+    setTimeout(() => {
+      pasteArea.focus();
+      pasteArea.setSelectionRange(pasteArea.value.length, pasteArea.value.length);
+    }, 50);
   }
 
-  function closePasteModal(){ pasteOverlay.classList.remove('open'); }
+  function closePasteModal(){
+    pasteOverlay.classList.remove('open');
+  }
 
   function runOutlineImport(){
-    const c = targetCellForImport();
+    const c = (typeof importTargetC === 'number') ? importTargetC : targetCellForImport();
     if (c === null){
       alert('取り込み先のセルが不明です。セルを選択し直してください。');
       return;
     }
+    const raw = pasteArea.value;
     let forest;
     try{
-      forest = parseOutlineText(pasteArea.value);
+      forest = parseOutlineText(raw);
     }catch(e){
       alert(e.message || '解析に失敗しました');
       return;
@@ -1157,10 +1208,11 @@
     }
 
     const node = currentNode();
-    const hasExisting = cellDisplay(node.cells[c]) || RING_ORDER.some((idx) => {
-      if (c === 4) return cellDisplay(node.cells[idx]) || node.children[idx];
-      return false;
-    }) || (c !== 4 && node.children[c]);
+    const hasExisting = !!(
+      cellDisplay(node.cells[c]) ||
+      (c === 4 && RING_ORDER.some((idx) => cellDisplay(node.cells[idx]) || node.children[idx])) ||
+      (c !== 4 && node.children[c])
+    );
     if (hasExisting){
       if (!confirm('選択中のセル（とその下の階層）の内容を上書きします。よろしいですか？')) return;
     }
@@ -1172,6 +1224,10 @@
       alert(e.message || '取り込みに失敗しました');
       return;
     }
+
+    lastPasteText = raw;
+    lastFocusedCellC = c;
+    importTargetC = c;
 
     if (longTextTarget && longTextTarget.c === c){
       setEditorContent(ltArea, currentNode().cells[c]);
