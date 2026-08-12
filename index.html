@@ -1386,6 +1386,20 @@
     updateFabTargetLabel();
     pasteHint.textContent = `取り込み先: ${cellRoleLabel(c)}（このセルを親として階層を展開します）`;
     pasteArea.value = '';
+
+    // Fast path: when clipboard already has outline text, import directly
+    // to avoid forcing the paste dialog every time.
+    try{
+      const clip = await navigator.clipboard.readText();
+      if (clip && clip.trim()){
+        const autoImported = importOutlineTextToCell(c, clip, true);
+        if (autoImported) return;
+      }
+    }catch(e){
+      // iOS/Safari can deny clipboard read; fallback to manual paste dialog.
+    }
+
+    // Fallback: show modal for manual paste/edit.
     pasteOverlay.classList.add('open');
     try{
       const clip = await navigator.clipboard.readText();
@@ -1404,34 +1418,27 @@
     pasteOverlay.classList.remove('open');
   }
 
-  function runOutlineImport(){
-    const c = (typeof importTargetC === 'number') ? importTargetC : targetCellForImport();
-    if (c === null){
-      alert('取り込み先のセルが不明です。セルを選択し直してください。');
-      return;
-    }
-    const raw = pasteArea.value;
+  function importOutlineTextToCell(c, raw, askConfirm){
     let parsed;
     try{
       parsed = parseOutlineText(raw);
     }catch(e){
       alert(e.message || '解析に失敗しました');
-      return;
+      return false;
     }
     if ((!parsed.forest || !parsed.forest.length) && !parsed.title){
-      alert('アウトライン形式の行が見つかりません。\n例:\n8月12日(水)　メンタ×2\n- やること\n  - 子1\n- 朝');
-      return;
+      return false;
     }
 
     const previewTitle = (parsed.title && String(parsed.title).trim())
       ? String(parsed.title).trim()
       : '(タイトルなし)';
     const childCount = (parsed.forest && parsed.forest.length) || 0;
-    if (!confirm(
+    if (askConfirm && !confirm(
       '取り込み先: ' + cellRoleLabel(c) + '\n' +
       'セルに入れる文字:\n「' + previewTitle + '」\n' +
       '周囲/子に置く項目: ' + childCount + '個\n\nよろしいですか？'
-    )) return;
+    )) return false;
 
     // Detach any active cell editor first so an empty textarea cannot overwrite the title
     try{ if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); }catch(e){}
@@ -1439,10 +1446,10 @@
 
     try{
       const ok = applyOutlineToFocusedCell(c, parsed);
-      if (!ok) return;
+      if (!ok) return false;
     }catch(e){
       alert(e.message || '取り込みに失敗しました');
-      return;
+      return false;
     }
 
     // Hard verify selected cell received the title
@@ -1471,6 +1478,20 @@
     }
     scheduleSave();
     updateFabTargetLabel();
+    return true;
+  }
+
+  function runOutlineImport(){
+    const c = (typeof importTargetC === 'number') ? importTargetC : targetCellForImport();
+    if (c === null){
+      alert('取り込み先のセルが不明です。セルを選択し直してください。');
+      return;
+    }
+    const raw = pasteArea.value;
+    const ok = importOutlineTextToCell(c, raw, true);
+    if (!ok){
+      alert('アウトライン形式の行が見つかりません。\n例:\n8月12日(水)　メンタ×2\n- やること\n  - 子1\n- 朝');
+    }
   }
 
   function buildExportText(){
