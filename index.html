@@ -176,6 +176,17 @@
     border-color:var(--accent);
     box-shadow: inset 0 0 0 2px rgba(178,58,46,.35);
   }
+  .cell.is-selected{
+    box-shadow: inset 0 0 0 3px var(--accent);
+    background:#fff8f6;
+  }
+  .cell.center.is-selected{
+    box-shadow: inset 0 0 0 3px var(--accent);
+  }
+  textarea.cell-editor{
+    display:block;
+    resize:none;
+  }
   textarea, .cell-editor, .lt-editor{
     width:100%; height:100%;
     border:0; resize:none; background:transparent;
@@ -533,6 +544,19 @@
   let importTargetC = null; // locked when paste modal opens
   let lastPasteText = ''; // remember last imported outline for easy re-paste
 
+  function selectCell(c){
+    if (typeof c !== 'number' || c < 0 || c > 8) return;
+    lastFocusedCellC = c;
+    boardEl.querySelectorAll('.cell.is-selected').forEach((el) => el.classList.remove('is-selected'));
+    const el = boardEl.querySelector('.cell[data-c="' + c + '"]');
+    if (el) el.classList.add('is-selected');
+    if (typeof updateFabTargetLabel === 'function') updateFabTargetLabel();
+  }
+
+  function isRichHtml(value){
+    return !!(value && looksLikeHtml(value) && /<(b|strong|u|div|br|p|span)\b/i.test(value));
+  }
+
   // ---- rich text helpers (cells store HTML; plain text still works) ----
   const ALLOWED_TAGS = /^(B|STRONG|U|BR|DIV|SPAN|P)$/i;
   function plainText(html){
@@ -810,37 +834,40 @@
         wrap.appendChild(ph);
       }
 
-      const ta = document.createElement('div');
+      const rich = isRichHtml(node.cells[c]);
+      let ta;
+      if (rich){
+        ta = document.createElement('div');
+        ta.contentEditable = 'true';
+        ta.setAttribute('role', 'textbox');
+        ta.setAttribute('aria-multiline', 'true');
+        setEditorContent(ta, node.cells[c]);
+      } else {
+        // plain textarea: reliable typing on iOS (esp. center cell)
+        ta = document.createElement('textarea');
+        ta.value = cellText(node.cells[c]);
+        ta.rows = 1;
+      }
       ta.className = 'cell-editor';
-      ta.contentEditable = 'true';
       ta.style.pointerEvents = 'none';
-      ta.setAttribute('role', 'textbox');
-      ta.setAttribute('aria-multiline', 'true');
       ta.setAttribute('inputmode', 'text');
-      setEditorContent(ta, node.cells[c]);
-      if (cellDisplay(node.cells[c])) wrap.classList.add('is-filled');
+      if (cellText(node.cells[c])) wrap.classList.add('is-filled');
+      if (lastFocusedCellC === c) cellEl.classList.add('is-selected');
 
+      const readValue = () => rich ? getEditorContent(ta) : (ta.value || '');
       const syncFillState = () => {
-        if (cellDisplay(getEditorContent(ta)) || (ta.textContent || '').trim()) wrap.classList.add('is-filled');
-        else wrap.classList.remove('is-filled');
+        if (cellDisplay(readValue()) || (rich ? (ta.textContent || '').trim() : (ta.value || '').trim())){
+          wrap.classList.add('is-filled');
+        } else {
+          wrap.classList.remove('is-filled');
+        }
       };
 
       ta.addEventListener('focus', () => {
-        lastFocusedCellC = c;
-        updateFabTargetLabel();
+        selectCell(c);
         wrap.classList.add('is-focused');
         cellEl.classList.add('editing');
         ta.style.pointerEvents = 'auto';
-        try{
-          const sel = window.getSelection();
-          if (sel && !(ta.textContent || '').trim()){
-            const range = document.createRange();
-            range.selectNodeContents(ta);
-            range.collapse(true);
-            sel.removeAllRanges();
-            sel.addRange(range);
-          }
-        }catch(e){}
       });
       ta.addEventListener('blur', () => {
         wrap.classList.remove('is-focused');
@@ -849,7 +876,7 @@
         syncFillState();
       });
       ta.addEventListener('input', () => {
-        node.cells[c] = getEditorContent(ta);
+        node.cells[c] = readValue();
         syncMirror(c);
         syncFillState();
         if (atRoot() && c === 4){ titleEl.textContent = cellDisplay(node.cells[c]) || 'マンダラート'; }
@@ -926,6 +953,7 @@
     function isEditing(){ return document.activeElement === ta; }
 
     function beginPress(e){
+      selectCell(c); // mark paste/import target even if focus fails
       startX = e.clientX; startY = e.clientY;
       lpReady = false;
       clearTimeout(lpTimer);
@@ -1078,6 +1106,11 @@
         lastFocusedCellC = Number(cell.dataset.c);
       }
     }
+    // fall back to visually selected cell
+    const selected = boardEl.querySelector('.cell.is-selected');
+    if (selected && selected.dataset.c !== undefined){
+      lastFocusedCellC = Number(selected.dataset.c);
+    }
     return lastFocusedCellC;
   }
 
@@ -1144,41 +1177,57 @@
   const RING_ORDER = [7, 6, 3, 0, 1, 2, 5, 8];
 
   function cellRoleLabel(c){
+    const names = ['左上','上','右上','左','中心','右','左下','下','右下'];
+    const pos = names[c] || ('位置' + (c + 1));
     if (c === 4) return atRoot() ? '中心ゴール' : 'この階層の中心';
-    return atRoot() ? `テーマ位置 ${c + 1}` : `詳細位置 ${c + 1}`;
+    return atRoot() ? ('テーマ・' + pos) : ('詳細・' + pos);
   }
   // ---- outline import (Workflowy-style nested "- " lists) ----
   function cleanOutlineText(s){
     return String(s || '')
+      .replace(/^\uFEFF/, '')
       .replace(/\*\*(.*?)\*\*/g, '$1')
       .replace(/__(.*?)__/g, '$1')
       .replace(/<\/?u>/gi, '')
       .replace(/<[^>]+>/g, '')
       .replace(/\u00a0/g, ' ')
+      .replace(/\u3000/g, ' ')
       .trim();
   }
 
+  function cellText(value){
+    if (value == null || value === '') return '';
+    const s = String(value);
+    // Avoid HTML round-trip for plain strings (can drop/alter text)
+    if (!/<[a-z][\s\S]*>/i.test(s)) return s.trim();
+    return plainText(s).trim();
+  }
+
+  function matchOutlineBullet(line){
+    const t = String(line || '').replace(/^\uFEFF/, '').replace(/\u3000/g, ' ');
+    return t.match(/^([ \t]*)([-*•・▪◦–—−]|\d+[.)])\s+(.*)$/);
+  }
+
   function parseOutlineText(text){
-    const lines = String(text || '').split(/\r?\n/);
+    const lines = String(text || '').replace(/^\uFEFF/, '').split(/\r\n|\n|\r|\u2028|\u2029/);
     const items = [];
     let title = null;
     let seenBullet = false;
+
     for (const raw of lines){
-      if (!raw.trim()) continue;
-      const m = raw.match(/^([ \t]*)([-*•]|\d+[.)])\s+(.*)$/);
+      if (!String(raw).trim()) continue;
+      const m = matchOutlineBullet(raw);
       if (m){
         seenBullet = true;
         const indent = m[1].replace(/\t/g, '  ').length;
         items.push({ indent, text: cleanOutlineText(m[3]) });
         continue;
       }
-      // Workflowy export: first non-bullet line before any bullets = selected-cell title
+      // First non-bullet line before any bullets = title for the selected cell
       if (!seenBullet && title === null){
         title = cleanOutlineText(raw);
       }
     }
-
-    if (!items.length && title === null) return { title: null, forest: [] };
 
     // depth from relative indent ranks only (ignore absolute whitespace size)
     let forest = [];
@@ -1196,7 +1245,15 @@
         stack.push({ depth: it.depth, children: node.children, node });
       });
     }
-    return { title, forest };
+
+    // Workflowy common copy: "- タイトル" as single root tree
+    // -> root text becomes selected-cell title, its children become surrounding cells
+    if ((title === null || title === '') && forest.length === 1){
+      title = forest[0].text || '';
+      forest = forest[0].children || [];
+    }
+
+    return { title: title || null, forest };
   }
 
   function findOverfullNodes(nodes, path){
@@ -1231,50 +1288,57 @@
   }
 
   function applyOutlineToFocusedCell(cellC, parsed){
-    const forest = Array.isArray(parsed) ? parsed : (parsed && parsed.forest) || [];
-    const title = Array.isArray(parsed) ? null : (parsed && parsed.title);
-    if (!forest.length && (title === null || title === undefined || title === '')){
-      throw new Error('アウトライン形式の行が見つかりません（先頭行＋ "- 項目" の形で貼ってください）');
+    let forest = Array.isArray(parsed) ? parsed.slice() : ((parsed && parsed.forest) || []).slice();
+    let title = Array.isArray(parsed) ? null : (parsed && parsed.title);
+    title = (title == null) ? null : String(title).trim();
+
+    if (!forest.length && !title){
+      throw new Error('アウトライン形式の行が見つかりません。\n例:\n8月12日(水)\n- やること\n  - 子\n- 朝');
     }
 
-    const treeForCheck = (title !== null && title !== undefined)
-      ? [{ text: title || '(選択セル)', children: forest }]
-      : forest;
+    const treeForCheck = [{ text: title || '(選択セル)', children: forest }];
     const overfull = findOverfullNodes(treeForCheck, '');
     if (forest.length > 8){
       overfull.unshift({ path: title || '(選択セル)', count: forest.length });
     }
-    if (overfull.length){
-      const sample = overfull.slice(0, 3).map((h) => `・${h.path}（${h.count}個）`).join('\n');
-      const more = overfull.length > 3 ? `\n…ほか${overfull.length - 3}件` : '';
+    // dedupe by path
+    const seen = new Set();
+    const overfullUnique = [];
+    overfull.forEach((h) => {
+      const key = h.path + ':' + h.count;
+      if (seen.has(key)) return;
+      seen.add(key);
+      overfullUnique.push(h);
+    });
+    if (overfullUnique.length){
+      const sample = overfullUnique.slice(0, 3).map((h) => `・${h.path}（${h.count}個）`).join('\n');
+      const more = overfullUnique.length > 3 ? `\n…ほか${overfullUnique.length - 3}件` : '';
       const ok = confirm(
         `子階層が8つを超える項目があります。先頭の8つだけ取り込みます。\n\n${sample}${more}\n\n続けますか？`
       );
       if (!ok) return false;
     }
 
-    let rootOutline;
-    if (title !== null && title !== undefined){
-      // Workflowy: title line -> selected cell, following bullets -> surrounding/children
-      rootOutline = { text: title, children: forest };
-    } else if (forest.length === 1){
-      rootOutline = forest[0];
-    } else {
-      // multiple top-level bullets become children of the focused cell
-      rootOutline = {
-        text: cellDisplay(currentNode().cells[cellC]),
-        children: forest
-      };
+    // Title ALWAYS goes to the selected cell.
+    // Children ALWAYS go around it (center) or into its nested board (non-center).
+    const existing = cellText(currentNode().cells[cellC]);
+    const centerText = (title && title.trim()) ? title.trim() : existing;
+    if (!centerText && forest.length){
+      throw new Error(
+        '選択セルに入れるタイトル行が見つかりません。\n' +
+        '1行目を「-」なしで書くか、Workflowyで親ノードを含めてコピーしてください。\n\n' +
+        '例:\n8月12日(水)　メンタ×2\n- やること\n- 朝'
+      );
     }
 
     const node = currentNode();
-    const centerText = rootOutline.text || '';
+    // Write selected cell text first, and again at the end (guard against accidental clear)
     node.cells[cellC] = centerText;
 
     if (cellC === 4){
       // center cell: children fill this board's outer ring
       clearOuterCells(node);
-      (rootOutline.children || []).slice(0, 8).forEach((kid, i) => {
+      forest.slice(0, 8).forEach((kid, i) => {
         const idx = RING_ORDER[i];
         node.cells[idx] = kid.text || '';
         node.children[idx] = (kid.children && kid.children.length)
@@ -1283,12 +1347,18 @@
       });
     } else {
       // non-center: children live in a nested board under this cell
-      node.children[cellC] = (rootOutline.children && rootOutline.children.length)
-        ? boardFromOutlineChildren(centerText, rootOutline.children)
+      node.children[cellC] = forest.length
+        ? boardFromOutlineChildren(centerText, forest)
         : null;
     }
 
+    // Ensure selected cell still holds the title after surrounding writes
+    node.cells[cellC] = centerText;
     syncMirror(cellC);
+
+    if (cellText(node.cells[cellC]) !== cellText(centerText)){
+      throw new Error('選択セルへの書き込みに失敗しました（内部エラー）');
+    }
     return true;
   }
 
@@ -1349,19 +1419,23 @@
       return;
     }
     if ((!parsed.forest || !parsed.forest.length) && !parsed.title){
-      alert('アウトライン形式の行が見つかりません。\n例:\n8月12日\n- やること\n  - 子1');
+      alert('アウトライン形式の行が見つかりません。\n例:\n8月12日(水)　メンタ×2\n- やること\n  - 子1\n- 朝');
       return;
     }
 
-    const node = currentNode();
-    const hasExisting = !!(
-      cellDisplay(node.cells[c]) ||
-      (c === 4 && RING_ORDER.some((idx) => cellDisplay(node.cells[idx]) || node.children[idx])) ||
-      (c !== 4 && node.children[c])
-    );
-    if (hasExisting){
-      if (!confirm('選択中のセル（とその下の階層）の内容を上書きします。よろしいですか？')) return;
-    }
+    const previewTitle = (parsed.title && String(parsed.title).trim())
+      ? String(parsed.title).trim()
+      : '(タイトルなし)';
+    const childCount = (parsed.forest && parsed.forest.length) || 0;
+    if (!confirm(
+      '取り込み先: ' + cellRoleLabel(c) + '\n' +
+      'セルに入れる文字:\n「' + previewTitle + '」\n' +
+      '周囲/子に置く項目: ' + childCount + '個\n\nよろしいですか？'
+    )) return;
+
+    // Detach any active cell editor first so an empty textarea cannot overwrite the title
+    try{ if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); }catch(e){}
+    pasteArea.blur();
 
     try{
       const ok = applyOutlineToFocusedCell(c, parsed);
@@ -1369,6 +1443,15 @@
     }catch(e){
       alert(e.message || '取り込みに失敗しました');
       return;
+    }
+
+    // Hard verify selected cell received the title
+    const expected = parsed.title ? String(parsed.title).trim() : '';
+    let written = cellText(currentNode().cells[c]);
+    if (expected && written !== expected){
+      currentNode().cells[c] = expected;
+      syncMirror(c);
+      written = cellText(currentNode().cells[c]);
     }
 
     lastPasteText = raw;
@@ -1380,7 +1463,14 @@
     }
     closePasteModal();
     render();
+    // Re-assert after render (guards against any late input handlers)
+    if (expected && cellText(currentNode().cells[c]) !== expected){
+      currentNode().cells[c] = expected;
+      syncMirror(c);
+      render();
+    }
     scheduleSave();
+    updateFabTargetLabel();
   }
 
   function buildExportText(){
