@@ -69,23 +69,72 @@
   .menuWrap{ position:relative; }
   .menuBtn{
     min-width:52px; height:52px; border:0; background:none;
-    font-size:var(--ui-font-size); line-height:1;
+    font-size:36px !important; line-height:1;
     color:var(--ink); cursor:pointer;
     display:flex; align-items:center; justify-content:center;
     padding:0 6px;
   }
-  .menu{
-    position:absolute; top:56px; right:4px; background:#fff; border:1px solid #e2e2e2;
-    border-radius:10px; box-shadow:0 6px 20px rgba(0,0,0,.12); overflow:hidden;
-    display:none; min-width:min(92vw, 420px); z-index:20;
+
+  /* floating menu (usable while a cell is focused / keyboard open) */
+  .fab-wrap{
+    position:fixed;
+    right:max(12px, env(safe-area-inset-right));
+    bottom:calc(88px + env(safe-area-inset-bottom));
+    z-index:50;
+    display:flex;
+    flex-direction:column;
+    align-items:flex-end;
+    gap:10px;
+    pointer-events:none;
   }
-  .menu.open{ display:block; }
-  .menu button{
-    display:block; width:100%; text-align:left; padding:14px 16px; border:0; background:none;
-    font-family:inherit; font-size:var(--ui-font-size); line-height:1.25; color:var(--ink); cursor:pointer;
+  .fab-wrap > *{ pointer-events:auto; }
+  .fab-target{
+    max-width:70vw;
+    padding:8px 12px;
+    border-radius:10px;
+    background:rgba(43,43,40,.92);
+    color:#fff;
+    font-size:36px !important;
+    line-height:1.2;
+    display:none;
   }
-  .menu button:active{ background:#f3f1ea; }
-  .menu button + button{ border-top:1px solid #eee; }
+  .fab-target.show{ display:block; }
+  .fab-menu{
+    display:none;
+    background:#fff;
+    border:1px solid #e2e2e2;
+    border-radius:12px;
+    box-shadow:0 10px 28px rgba(0,0,0,.2);
+    overflow:hidden;
+    min-width:min(92vw, 440px);
+    max-height:min(60vh, 520px);
+    overflow-y:auto;
+    -webkit-text-size-adjust:100%;
+    text-size-adjust:100%;
+  }
+  .fab-menu.open{ display:block; }
+  .fab-menu button{
+    display:block; width:100%; text-align:left;
+    padding:16px 18px; border:0; background:none;
+    font-family:"Zen Kaku Gothic New", -apple-system, BlinkMacSystemFont, sans-serif;
+    font-size:36px !important;
+    line-height:1.25;
+    color:var(--ink);
+    cursor:pointer;
+    -webkit-text-size-adjust:100%;
+    text-size-adjust:100%;
+  }
+  .fab-menu button:active{ background:#f3f1ea; }
+  .fab-menu button + button{ border-top:1px solid #eee; }
+  .fab-btn{
+    width:64px; height:64px; border:0; border-radius:50%;
+    background:#2b2b28; color:#fff;
+    font-size:36px !important; line-height:1;
+    box-shadow:0 8px 20px rgba(0,0,0,.25);
+    cursor:pointer;
+    display:flex; align-items:center; justify-content:center;
+  }
+  .fab-btn:active{ background:var(--accent); }
 
   /* board area */
   .stage{
@@ -318,14 +367,6 @@
   <div class="title" id="titleEl">マンダラート</div>
   <div class="menuWrap">
     <button class="menuBtn" id="menuBtn" aria-label="メニュー">⋯</button>
-    <div class="menu" id="menu">
-      <button id="exportBtn">書き出す（テキスト）</button>
-      <button id="exportMdBtn">書き出す（Markdown）</button>
-      <button id="exportWfBtn">書き出す（Workflowy）</button>
-      <button id="importOutlineBtn">アウトラインを取り込む</button>
-      <button id="styleBtn">文字スタイル</button>
-      <button id="resetBtn">クリア</button>
-    </div>
   </div>
 </div>
 
@@ -335,6 +376,19 @@
     <div class="lt-label" id="ltLabel"></div>
     <div class="lt-editor" id="ltArea" contenteditable="true" data-placeholder="ここに自由に書けます"></div>
   </div>
+</div>
+
+<div class="fab-wrap" id="fabWrap">
+  <div class="fab-target" id="fabTarget"></div>
+  <div class="fab-menu" id="menu">
+    <button type="button" id="exportBtn">書き出す（テキスト）</button>
+    <button type="button" id="exportMdBtn">書き出す（Markdown）</button>
+    <button type="button" id="exportWfBtn">書き出す（Workflowy）</button>
+    <button type="button" id="importOutlineBtn">アウトラインを取り込む</button>
+    <button type="button" id="styleBtn">文字スタイル</button>
+    <button type="button" id="resetBtn">クリア</button>
+  </div>
+  <button type="button" class="fab-btn" id="fabMenuBtn" aria-label="メニュー">⋯</button>
 </div>
 
 <div class="fmt-bar" id="fmtBar">
@@ -772,6 +826,7 @@
 
       ta.addEventListener('focus', () => {
         lastFocusedCellC = c;
+        updateFabTargetLabel();
         wrap.classList.add('is-focused');
         cellEl.classList.add('editing');
         ta.style.pointerEvents = 'auto';
@@ -1007,8 +1062,58 @@
   }
 
   // ---- menu / export / reset ----
-  menuBtn.addEventListener('pointerup', (e) => { e.stopPropagation(); menu.classList.toggle('open'); });
-  document.addEventListener('pointerup', () => menu.classList.remove('open'));
+  const fabMenuBtn = document.getElementById('fabMenuBtn');
+  const fabTarget = document.getElementById('fabTarget');
+
+  function captureFocusedCell(){
+    if (longTextTarget){
+      lastFocusedCellC = longTextTarget.c;
+      return lastFocusedCellC;
+    }
+    const active = document.activeElement;
+    if (active && active.classList && active.classList.contains('cell-editor')){
+      const cell = active.closest('.cell');
+      if (cell && cell.dataset.c !== undefined){
+        lastFocusedCellC = Number(cell.dataset.c);
+      }
+    }
+    return lastFocusedCellC;
+  }
+
+  function updateFabTargetLabel(){
+    if (typeof lastFocusedCellC === 'number'){
+      fabTarget.textContent = '選択中: ' + cellRoleLabel(lastFocusedCellC);
+      fabTarget.classList.add('show');
+    } else {
+      fabTarget.textContent = '';
+      fabTarget.classList.remove('show');
+    }
+  }
+
+  function openMenu(e){
+    if (e){ e.preventDefault(); e.stopPropagation(); }
+    captureFocusedCell();
+    updateFabTargetLabel();
+    menu.classList.add('open');
+  }
+  function closeMenu(){ menu.classList.remove('open'); }
+  function toggleMenu(e){
+    if (e){ e.preventDefault(); e.stopPropagation(); }
+    if (menu.classList.contains('open')) closeMenu();
+    else openMenu();
+  }
+
+  menuBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); captureFocusedCell(); });
+  fabMenuBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); captureFocusedCell(); });
+  menuBtn.addEventListener('pointerup', toggleMenu);
+  fabMenuBtn.addEventListener('pointerup', toggleMenu);
+  document.addEventListener('pointerdown', (e) => {
+    if (!menu.classList.contains('open')) return;
+    if (e.target.closest('#menu, #menuBtn, #fabMenuBtn, #fabWrap')) return;
+    closeMenu();
+  });
+  // prevent accidental close from the same gesture that opens items
+  menu.addEventListener('pointerup', (e) => e.stopPropagation());
 
   const overlay = document.getElementById('modalOverlay');
   const exportArea = document.getElementById('exportArea');
@@ -1017,6 +1122,10 @@
   // top-left, top-mid, top-right, mid-right, bottom-right (starts at 6 o'clock, sweeps around)
   const RING_ORDER = [7, 6, 3, 0, 1, 2, 5, 8];
 
+  function cellRoleLabel(c){
+    if (c === 4) return atRoot() ? '中心ゴール' : 'この階層の中心';
+    return atRoot() ? `テーマ位置 ${c + 1}` : `詳細位置 ${c + 1}`;
+  }
   // ---- outline import (Workflowy-style nested "- " lists) ----
   function cleanOutlineText(s){
     return String(s || '')
@@ -1145,14 +1254,10 @@
   }
 
   function targetCellForImport(){
+    captureFocusedCell();
     if (longTextTarget) return longTextTarget.c;
     if (typeof lastFocusedCellC === 'number') return lastFocusedCellC;
     return null;
-  }
-
-  function cellRoleLabel(c){
-    if (c === 4) return atRoot() ? '中心ゴール' : 'この階層の中心';
-    return atRoot() ? `テーマ位置 ${c + 1}` : `詳細位置 ${c + 1}`;
   }
 
   const pasteOverlay = document.getElementById('pasteOverlay');
@@ -1160,7 +1265,8 @@
   const pasteHint = document.getElementById('pasteHint');
 
   async function openPasteModal(){
-    menu.classList.remove('open');
+    closeMenu();
+    captureFocusedCell();
     const c = targetCellForImport();
     if (c === null){
       alert('先にセルをタップしてカーソルを入れてから、もう一度実行してください。');
@@ -1168,6 +1274,7 @@
     }
     importTargetC = c;
     lastFocusedCellC = c;
+    updateFabTargetLabel();
     pasteHint.textContent = `取り込み先: ${cellRoleLabel(c)}（このセルを親として階層を展開します）`;
     pasteArea.value = '';
     pasteOverlay.classList.add('open');
@@ -1304,17 +1411,17 @@
   }
 
   document.getElementById('exportBtn').addEventListener('pointerup', () => {
-    menu.classList.remove('open');
+    closeMenu();
     exportArea.value = buildExportText();
     overlay.classList.add('open');
   });
   document.getElementById('exportMdBtn').addEventListener('pointerup', () => {
-    menu.classList.remove('open');
+    closeMenu();
     exportArea.value = buildMarkdownText();
     overlay.classList.add('open');
   });
   document.getElementById('exportWfBtn').addEventListener('pointerup', () => {
-    menu.classList.remove('open');
+    closeMenu();
     exportArea.value = buildWorkflowyText();
     overlay.classList.add('open');
   });
@@ -1329,7 +1436,7 @@
 
   const styleOverlay = document.getElementById('styleOverlay');
   document.getElementById('styleBtn').addEventListener('pointerup', () => {
-    menu.classList.remove('open');
+    closeMenu();
     applyStyleSettings();
     styleOverlay.classList.add('open');
   });
@@ -1358,7 +1465,7 @@
     setTimeout(() => { document.getElementById('copyBtn').textContent = 'コピー'; }, 1500);
   });
   document.getElementById('resetBtn').addEventListener('pointerup', () => {
-    menu.classList.remove('open');
+    closeMenu();
     if (!confirm('すべての内容をクリアします。よろしいですか？')) return;
     root = makeNode();
     navPath = [{ node: root, idx: null }];
