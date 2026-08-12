@@ -79,13 +79,14 @@
   .fab-wrap{
     position:fixed;
     right:max(12px, env(safe-area-inset-right));
-    bottom:calc(88px + env(safe-area-inset-bottom));
+    bottom:calc(88px + env(safe-area-inset-bottom) + var(--fab-keyboard-offset, 0px));
     z-index:50;
     display:flex;
     flex-direction:column;
     align-items:flex-end;
     gap:10px;
     pointer-events:none;
+    transition:bottom .12s ease;
   }
   .fab-wrap > *{ pointer-events:auto; }
   .fab-target{
@@ -452,8 +453,8 @@
 <div class="modal-overlay" id="pasteOverlay">
   <div class="modal">
     <h2>アウトラインを取り込む</h2>
-    <p class="paste-hint" id="pasteHint">選択中のセルを親として、Workflowy形式（ネストした - リスト）を取り込みます。</p>
-    <textarea class="paste-area" id="pasteArea" placeholder="- 親&#10;  - 子1&#10;  - 子2&#10;    - 孫"></textarea>
+    <p class="paste-hint" id="pasteHint">先頭の無印行→選択中セル。続く - リスト→周辺セル（インデントの相対関係だけで階層判定）。</p>
+    <textarea class="paste-area" id="pasteArea" placeholder="8月12日(水)&#10;- やること&#10;  - 子1&#10;  - 子2&#10;- 朝"></textarea>
     <div class="modal-actions">
       <button id="cancelPasteBtn">キャンセル</button>
       <button class="primary" id="runPasteBtn">取り込む</button>
@@ -1112,6 +1113,26 @@
     if (e.target.closest('#menu, #menuBtn, #fabMenuBtn, #fabWrap')) return;
     closeMenu();
   });
+
+  // Keep floating menu above the iOS keyboard (visualViewport)
+  const fabWrap = document.getElementById('fabWrap');
+  function syncFabToViewport(){
+    const vv = window.visualViewport;
+    if (!fabWrap) return;
+    let covered = 0;
+    if (vv){
+      covered = Math.max(0, window.innerHeight - (vv.height + vv.offsetTop));
+      const avail = Math.max(140, vv.height - 120);
+      menu.style.maxHeight = avail + 'px';
+    }
+    document.documentElement.style.setProperty('--fab-keyboard-offset', covered + 'px');
+  }
+  if (window.visualViewport){
+    visualViewport.addEventListener('resize', syncFabToViewport);
+    visualViewport.addEventListener('scroll', syncFabToViewport);
+  }
+  window.addEventListener('resize', syncFabToViewport);
+  syncFabToViewport();
   // prevent accidental close from the same gesture that opens items
   menu.addEventListener('pointerup', (e) => e.stopPropagation());
 
@@ -1140,37 +1161,42 @@
   function parseOutlineText(text){
     const lines = String(text || '').split(/\r?\n/);
     const items = [];
+    let title = null;
+    let seenBullet = false;
     for (const raw of lines){
       if (!raw.trim()) continue;
       const m = raw.match(/^([ \t]*)([-*•]|\d+[.)])\s+(.*)$/);
-      if (!m) continue;
-      const indent = m[1].replace(/\t/g, '  ').length;
-      items.push({ indent, text: cleanOutlineText(m[3]) });
+      if (m){
+        seenBullet = true;
+        const indent = m[1].replace(/\t/g, '  ').length;
+        items.push({ indent, text: cleanOutlineText(m[3]) });
+        continue;
+      }
+      // Workflowy export: first non-bullet line before any bullets = selected-cell title
+      if (!seenBullet && title === null){
+        title = cleanOutlineText(raw);
+      }
     }
-    if (!items.length) return [];
 
-    // infer indent unit from the smallest positive indent step
-    let unit = 2;
-    const indents = [...new Set(items.map((it) => it.indent))].sort((a, b) => a - b);
-    for (let i = 1; i < indents.length; i++){
-      const step = indents[i] - indents[i - 1];
-      if (step > 0){ unit = step; break; }
+    if (!items.length && title === null) return { title: null, forest: [] };
+
+    // depth from relative indent ranks only (ignore absolute whitespace size)
+    let forest = [];
+    if (items.length){
+      const indents = [...new Set(items.map((it) => it.indent))].sort((a, b) => a - b);
+      const depthOf = new Map(indents.map((ind, i) => [ind, i]));
+      items.forEach((it) => { it.depth = depthOf.get(it.indent); });
+
+      const stack = [{ depth: -1, children: forest }];
+      items.forEach((it) => {
+        while (stack.length && stack[stack.length - 1].depth >= it.depth) stack.pop();
+        const parent = stack[stack.length - 1];
+        const node = { text: it.text, children: [] };
+        parent.children.push(node);
+        stack.push({ depth: it.depth, children: node.children, node });
+      });
     }
-    const minIndent = indents[0];
-    items.forEach((it) => {
-      it.depth = Math.round((it.indent - minIndent) / unit);
-    });
-
-    const forest = [];
-    const stack = [{ depth: -1, children: forest }];
-    items.forEach((it) => {
-      while (stack.length && stack[stack.length - 1].depth >= it.depth) stack.pop();
-      const parent = stack[stack.length - 1];
-      const node = { text: it.text, children: [] };
-      parent.children.push(node);
-      stack.push({ depth: it.depth, children: node.children, node });
-    });
-    return forest;
+    return { title, forest };
   }
 
   function findOverfullNodes(nodes, path){
@@ -1204,10 +1230,20 @@
     });
   }
 
-  function applyOutlineToFocusedCell(cellC, forest){
-    if (!forest.length) throw new Error('アウトライン形式の行が見つかりません（"- 項目" の形で貼ってください）');
+  function applyOutlineToFocusedCell(cellC, parsed){
+    const forest = Array.isArray(parsed) ? parsed : (parsed && parsed.forest) || [];
+    const title = Array.isArray(parsed) ? null : (parsed && parsed.title);
+    if (!forest.length && (title === null || title === undefined || title === '')){
+      throw new Error('アウトライン形式の行が見つかりません（先頭行＋ "- 項目" の形で貼ってください）');
+    }
 
-    const overfull = findOverfullNodes(forest, '');
+    const treeForCheck = (title !== null && title !== undefined)
+      ? [{ text: title || '(選択セル)', children: forest }]
+      : forest;
+    const overfull = findOverfullNodes(treeForCheck, '');
+    if (forest.length > 8){
+      overfull.unshift({ path: title || '(選択セル)', count: forest.length });
+    }
     if (overfull.length){
       const sample = overfull.slice(0, 3).map((h) => `・${h.path}（${h.count}個）`).join('\n');
       const more = overfull.length > 3 ? `\n…ほか${overfull.length - 3}件` : '';
@@ -1218,7 +1254,10 @@
     }
 
     let rootOutline;
-    if (forest.length === 1){
+    if (title !== null && title !== undefined){
+      // Workflowy: title line -> selected cell, following bullets -> surrounding/children
+      rootOutline = { text: title, children: forest };
+    } else if (forest.length === 1){
       rootOutline = forest[0];
     } else {
       // multiple top-level bullets become children of the focused cell
@@ -1302,15 +1341,15 @@
       return;
     }
     const raw = pasteArea.value;
-    let forest;
+    let parsed;
     try{
-      forest = parseOutlineText(raw);
+      parsed = parseOutlineText(raw);
     }catch(e){
       alert(e.message || '解析に失敗しました');
       return;
     }
-    if (!forest.length){
-      alert('アウトライン形式の行が見つかりません。\n例:\n- 親\n  - 子1\n  - 子2');
+    if ((!parsed.forest || !parsed.forest.length) && !parsed.title){
+      alert('アウトライン形式の行が見つかりません。\n例:\n8月12日\n- やること\n  - 子1');
       return;
     }
 
@@ -1325,7 +1364,7 @@
     }
 
     try{
-      const ok = applyOutlineToFocusedCell(c, forest);
+      const ok = applyOutlineToFocusedCell(c, parsed);
       if (!ok) return;
     }catch(e){
       alert(e.message || '取り込みに失敗しました');
