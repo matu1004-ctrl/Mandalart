@@ -78,25 +78,39 @@
   /* floating menu (usable while a cell is focused / keyboard open) */
   .fab-wrap{
     position:fixed;
+    left:max(12px, env(safe-area-inset-left));
     right:max(12px, env(safe-area-inset-right));
     bottom:calc(88px + env(safe-area-inset-bottom) + var(--fab-keyboard-offset, 0px));
     z-index:50;
     display:flex;
     flex-direction:column;
-    align-items:flex-end;
-    gap:10px;
+    align-items:stretch;
+    gap:8px;
     pointer-events:none;
     transition:bottom .12s ease;
   }
   .fab-wrap > *{ pointer-events:auto; }
+  .fab-bar{
+    display:flex;
+    flex-direction:row;
+    align-items:center;
+    gap:8px;
+    width:100%;
+    min-height:48px;
+  }
+  .fab-bar.no-target{ justify-content:flex-end; }
   .fab-target{
-    max-width:70vw;
-    padding:8px 12px;
+    flex:1;
+    min-width:0;
+    padding:10px 12px;
     border-radius:10px;
     background:rgba(43,43,40,.92);
     color:#fff;
-    font-size:36px !important;
-    line-height:1.2;
+    font-size:14px !important;
+    line-height:1.3;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
     display:none;
   }
   .fab-target.show{ display:block; }
@@ -107,7 +121,7 @@
     border-radius:12px;
     box-shadow:0 10px 28px rgba(0,0,0,.2);
     overflow:hidden;
-    min-width:min(92vw, 440px);
+    width:100%;
     max-height:min(60vh, 520px);
     overflow-y:auto;
     -webkit-text-size-adjust:100%;
@@ -128,9 +142,10 @@
   .fab-menu button:active{ background:#f3f1ea; }
   .fab-menu button + button{ border-top:1px solid #eee; }
   .fab-btn{
-    width:64px; height:64px; border:0; border-radius:50%;
+    flex-shrink:0;
+    width:48px; height:48px; border:0; border-radius:50%;
     background:#2b2b28; color:#fff;
-    font-size:36px !important; line-height:1;
+    font-size:28px !important; line-height:1;
     box-shadow:0 8px 20px rgba(0,0,0,.25);
     cursor:pointer;
     display:flex; align-items:center; justify-content:center;
@@ -391,7 +406,6 @@
 </div>
 
 <div class="fab-wrap" id="fabWrap">
-  <div class="fab-target" id="fabTarget"></div>
   <div class="fab-menu" id="menu">
     <button type="button" id="exportBtn">書き出す（テキスト）</button>
     <button type="button" id="exportMdBtn">書き出す（Markdown）</button>
@@ -400,7 +414,10 @@
     <button type="button" id="styleBtn">文字スタイル</button>
     <button type="button" id="resetBtn">クリア</button>
   </div>
-  <button type="button" class="fab-btn" id="fabMenuBtn" aria-label="メニュー">⋯</button>
+  <div class="fab-bar" id="fabBar">
+    <div class="fab-target" id="fabTarget"></div>
+    <button type="button" class="fab-btn" id="fabMenuBtn" aria-label="メニュー">⋯</button>
+  </div>
 </div>
 
 <div class="fmt-bar" id="fmtBar">
@@ -464,8 +481,8 @@
 <div class="modal-overlay" id="pasteOverlay">
   <div class="modal">
     <h2>アウトラインを取り込む</h2>
-    <p class="paste-hint" id="pasteHint">先頭の無印行→選択中セル。続く - リスト→周辺セル（インデントの相対関係だけで階層判定）。</p>
-    <textarea class="paste-area" id="pasteArea" placeholder="8月12日(水)&#10;- やること&#10;  - 子1&#10;  - 子2&#10;- 朝"></textarea>
+    <p class="paste-hint" id="pasteHint">下の欄を長押しして「ペースト」。貼り付けると自動で取り込みます。</p>
+    <textarea class="paste-area" id="pasteArea" placeholder="ここに長押し→ペースト&#10;&#10;8月12日(水)&#10;- やること&#10;  - 子1&#10;- 朝"></textarea>
     <div class="modal-actions">
       <button id="cancelPasteBtn">キャンセル</button>
       <button class="primary" id="runPasteBtn">取り込む</button>
@@ -1093,6 +1110,7 @@
   // ---- menu / export / reset ----
   const fabMenuBtn = document.getElementById('fabMenuBtn');
   const fabTarget = document.getElementById('fabTarget');
+  const fabBar = document.getElementById('fabBar');
 
   function captureFocusedCell(){
     if (longTextTarget){
@@ -1118,9 +1136,11 @@
     if (typeof lastFocusedCellC === 'number'){
       fabTarget.textContent = '選択中: ' + cellRoleLabel(lastFocusedCellC);
       fabTarget.classList.add('show');
+      if (fabBar) fabBar.classList.remove('no-target');
     } else {
       fabTarget.textContent = '';
       fabTarget.classList.remove('show');
+      if (fabBar) fabBar.classList.add('no-target');
     }
   }
 
@@ -1372,8 +1392,20 @@
   const pasteOverlay = document.getElementById('pasteOverlay');
   const pasteArea = document.getElementById('pasteArea');
   const pasteHint = document.getElementById('pasteHint');
+  let pasteImportActive = false;
 
-  async function openPasteModal(){
+  function onPasteImportEvent(e){
+    if (!pasteImportActive) return;
+    const text = e.clipboardData && e.clipboardData.getData('text/plain');
+    if (!text || !String(text).trim()) return;
+    e.preventDefault();
+    e.stopPropagation();
+    pasteArea.value = text;
+    lastPasteText = text;
+    setTimeout(() => runOutlineImportFromPaste(text), 0);
+  }
+
+  function openPasteModal(){
     closeMenu();
     captureFocusedCell();
     const c = targetCellForImport();
@@ -1384,39 +1416,29 @@
     importTargetC = c;
     lastFocusedCellC = c;
     updateFabTargetLabel();
-    pasteHint.textContent = `取り込み先: ${cellRoleLabel(c)}（このセルを親として階層を展開します）`;
+
+    // Move focus away from the cell editor so iOS delivers paste to pasteArea.
+    try{ if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); }catch(e){}
+
+    pasteHint.textContent = `取り込み先: ${cellRoleLabel(c)}。下の欄を長押しして「ペースト」（貼り付けると自動で取り込みます）`;
     pasteArea.value = '';
-
-    // Fast path: when clipboard already has outline text, import directly
-    // to avoid forcing the paste dialog every time.
-    try{
-      const clip = await navigator.clipboard.readText();
-      if (clip && clip.trim()){
-        const autoImported = importOutlineTextToCell(c, clip, true);
-        if (autoImported) return;
-      }
-    }catch(e){
-      // iOS/Safari can deny clipboard read; fallback to manual paste dialog.
-    }
-
-    // Fallback: show modal for manual paste/edit.
+    pasteImportActive = true;
     pasteOverlay.classList.add('open');
-    try{
-      const clip = await navigator.clipboard.readText();
-      if (clip && clip.trim()) pasteArea.value = clip;
-      else if (lastPasteText) pasteArea.value = lastPasteText;
-    }catch(e){
-      if (lastPasteText) pasteArea.value = lastPasteText;
-    }
     setTimeout(() => {
       pasteArea.focus();
-      pasteArea.setSelectionRange(pasteArea.value.length, pasteArea.value.length);
-    }, 50);
+      if (pasteArea.setSelectionRange){
+        pasteArea.setSelectionRange(0, 0);
+      }
+    }, 80);
   }
 
   function closePasteModal(){
+    pasteImportActive = false;
     pasteOverlay.classList.remove('open');
   }
+
+  pasteArea.addEventListener('paste', onPasteImportEvent);
+  document.addEventListener('paste', onPasteImportEvent, true);
 
   function importOutlineTextToCell(c, raw, askConfirm){
     let parsed;
@@ -1481,6 +1503,20 @@
     return true;
   }
 
+  function runOutlineImportFromPaste(raw){
+    const c = (typeof importTargetC === 'number') ? importTargetC : targetCellForImport();
+    if (c === null){
+      alert('取り込み先のセルが不明です。セルを選択し直してください。');
+      return false;
+    }
+    const ok = importOutlineTextToCell(c, raw, true);
+    if (!ok){
+      alert('アウトライン形式の行が見つかりません。\n例:\n8月12日(水)　メンタ×2\n- やること\n  - 子1\n- 朝');
+      return false;
+    }
+    return true;
+  }
+
   function runOutlineImport(){
     const c = (typeof importTargetC === 'number') ? importTargetC : targetCellForImport();
     if (c === null){
@@ -1488,9 +1524,9 @@
       return;
     }
     const raw = pasteArea.value;
-    const ok = importOutlineTextToCell(c, raw, true);
-    if (!ok){
-      alert('アウトライン形式の行が見つかりません。\n例:\n8月12日(水)　メンタ×2\n- やること\n  - 子1\n- 朝');
+    if (!runOutlineImportFromPaste(raw)){
+      // keep modal open for retry
+      pasteImportActive = true;
     }
   }
 
@@ -1723,6 +1759,7 @@
 
   loadStyleSettings();
   loadData();
+  updateFabTargetLabel();
   function sizeBoard(){
     const stage = document.querySelector('.stage');
     if (!stage) return;
