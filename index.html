@@ -411,6 +411,7 @@
     <button type="button" id="exportMdBtn">書き出す（Markdown）</button>
     <button type="button" id="exportWfBtn">書き出す（Workflowy）</button>
     <button type="button" id="importOutlineBtn">アウトラインを取り込む</button>
+    <button type="button" id="fillTemplateBtn">テンプレートを入れる</button>
     <button type="button" id="styleBtn">文字スタイル</button>
     <button type="button" id="resetBtn">クリア</button>
   </div>
@@ -1650,6 +1651,40 @@
     }
     setTimeout(() => { document.getElementById('copyBtn').textContent = 'コピー'; }, 1500);
   });
+  // Image-matched labels for the current 3x3 board (empty cells only)
+  const BOARD_TEMPLATE = [
+    'アイデア',        // 0 top-left
+    'メモ',            // 1 top-center
+    '発見',            // 2 top-right
+    '次のアクション',  // 3 mid-left
+    '目標',            // 4 center
+    '脱線',            // 5 mid-right
+    '前のタスク',      // 6 bottom-left
+    '現在時刻',        // 7 bottom-center
+    '対策'             // 8 bottom-right
+  ];
+
+  function fillCurrentBoardTemplate(){
+    closeMenu();
+    try{ if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); }catch(e){}
+    const node = currentNode();
+    let filled = 0;
+    for (let c = 0; c < 9; c++){
+      if (cellText(node.cells[c])) continue;
+      node.cells[c] = BOARD_TEMPLATE[c];
+      syncMirror(c);
+      filled++;
+    }
+    if (!filled){
+      alert('空のセルがありません（既存の文字はそのままです）');
+      return;
+    }
+    render();
+    scheduleSave();
+  }
+
+  document.getElementById('fillTemplateBtn').addEventListener('pointerup', fillCurrentBoardTemplate);
+
   document.getElementById('resetBtn').addEventListener('pointerup', () => {
     closeMenu();
     if (!confirm('すべての内容をクリアします。よろしいですか？')) return;
