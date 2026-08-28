@@ -24,7 +24,8 @@
     --accent:#B23A2E;
     --gap: clamp(10px, 3.2vw, 18px);
     --topbar-h: 64px;
-    --cell-font-size: 16px;
+    --cell-font-size: 20px;
+    --cell-display-scale: 0.75;
     --cell-font-family: "Zen Kaku Gothic New", -apple-system, BlinkMacSystemFont, sans-serif;
     --ui-font-size: 36px;
   }
@@ -206,7 +207,7 @@
     width:100%; height:100%;
     border:0; resize:none; background:transparent;
     font-family:var(--cell-font-family); color:var(--ink);
-    font-size: var(--cell-font-size);
+    font-size: calc(var(--cell-font-size) / var(--cell-display-scale));
     line-height:1.3;
     padding:6px;
     text-align:center;
@@ -230,7 +231,7 @@
     display:flex; align-items:center; justify-content:center;
     color:var(--ink-soft);
     font-family:var(--cell-font-family);
-    font-size:var(--cell-font-size);
+    font-size:calc(var(--cell-font-size) / var(--cell-display-scale));
     pointer-events:none;
     z-index:0;
   }
@@ -261,6 +262,16 @@
   .cell.center .cell-editor{ font-weight:700; }
   .cell-editor b, .cell-editor strong, .lt-editor b, .lt-editor strong{ font-weight:700; }
   .cell-editor u, .lt-editor u{ text-decoration:underline; }
+
+  /* PC: skip the mobile shrink trick so cell text reads at the chosen size */
+  @media (min-width: 768px){
+    :root{ --cell-display-scale: 1; }
+    .cell-editor-wrap{
+      top:0; left:0;
+      width:100%; height:100%;
+      transform:none;
+    }
+  }
 
   /* export modal */
   .modal-overlay{
@@ -453,14 +464,16 @@
         <select id="fontSizeSelect">
           <option value="12">12</option>
           <option value="14">14</option>
-          <option value="16" selected>16</option>
+          <option value="16">16</option>
           <option value="18">18</option>
-          <option value="20">20</option>
+          <option value="20" selected>20</option>
           <option value="22">22</option>
           <option value="24">24</option>
           <option value="28">28</option>
           <option value="32">32</option>
           <option value="36">36</option>
+          <option value="40">40</option>
+          <option value="48">48</option>
         </select>
       </div>
       <div class="style-row">
@@ -502,7 +515,7 @@
     system: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif'
   };
 
-  let styleSettings = { size: 16, family: 'gothic' };
+  let styleSettings = { size: 20, family: 'gothic' };
 
   function applyStyleSettings(){
     const rootStyle = document.documentElement.style;
@@ -525,7 +538,7 @@
         const parsed = JSON.parse(raw);
         const size = Number(parsed && parsed.size);
         const family = parsed && parsed.family;
-        if ([12,14,16,18,20,22,24,28,32,36].includes(size)) styleSettings.size = size;
+        if ([12,14,16,18,20,22,24,28,32,36,40,48].includes(size)) styleSettings.size = size;
         if (FONT_FAMILIES[family]) styleSettings.family = family;
       }
     }catch(e){}
