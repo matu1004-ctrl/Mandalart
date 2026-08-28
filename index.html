@@ -584,6 +584,59 @@
     if (typeof updateFabTargetLabel === 'function') updateFabTargetLabel();
   }
 
+  // Tab order: center → bottom-mid → bottom-left → … (clockwise around the ring)
+  const TAB_ORDER = [4, 7, 6, 3, 0, 1, 2, 5, 8];
+
+  function placeCursorAtEnd(editor){
+    if (!editor) return;
+    if (editor.tagName === 'TEXTAREA'){
+      const len = (editor.value || '').length;
+      try{ editor.setSelectionRange(len, len); }catch(e){}
+      return;
+    }
+    const range = document.createRange();
+    range.selectNodeContents(editor);
+    range.collapse(false);
+    const sel = window.getSelection();
+    if (!sel) return;
+    sel.removeAllRanges();
+    sel.addRange(range);
+  }
+
+  function editorHasText(editor){
+    if (!editor) return false;
+    if (editor.tagName === 'TEXTAREA') return !!(editor.value || '').trim();
+    return !!(editor.textContent || '').trim();
+  }
+
+  function focusCellEditor(c){
+    if (longtextEl.classList.contains('show')) return false;
+    const cellEl = boardEl.querySelector('.cell[data-c="' + c + '"]');
+    if (!cellEl) return false;
+    const editor = cellEl.querySelector('.cell-editor');
+    if (!editor) return false;
+    const wrap = cellEl.querySelector('.cell-editor-wrap');
+    editor.style.pointerEvents = 'auto';
+    cellEl.classList.add('editing');
+    if (wrap) wrap.classList.add('is-focused');
+    editor.focus();
+    if (editorHasText(editor)) placeCursorAtEnd(editor);
+    selectCell(c);
+    return true;
+  }
+
+  function moveCellFocus(step){
+    const active = document.activeElement;
+    if (!active || !active.classList.contains('cell-editor') || !boardEl.contains(active)) return false;
+    const cell = active.closest('.cell');
+    if (!cell || cell.dataset.c === undefined) return false;
+    const currentC = Number(cell.dataset.c);
+    const idx = TAB_ORDER.indexOf(currentC);
+    if (idx === -1) return false;
+    const nextIdx = (idx + step + TAB_ORDER.length) % TAB_ORDER.length;
+    return focusCellEditor(TAB_ORDER[nextIdx]);
+  }
+
   function isRichHtml(value){
     return !!(value && looksLikeHtml(value) && /<(b|strong|u|div|br|p|span)\b/i.test(value));
   }
@@ -1805,9 +1858,23 @@
     }
   });
 
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Tab') return;
+    if (longtextEl.classList.contains('show')) return;
+    if (pasteOverlay.classList.contains('open')) return;
+    if (overlay.classList.contains('open')) return;
+    if (styleOverlay.classList.contains('open')) return;
+    const active = document.activeElement;
+    if (!active || !active.classList.contains('cell-editor') || !boardEl.contains(active)) return;
+    e.preventDefault();
+    moveCellFocus(e.shiftKey ? -1 : 1);
+  });
+
   loadStyleSettings();
   loadData();
   updateFabTargetLabel();
+  selectCell(4);
+  requestAnimationFrame(() => focusCellEditor(4));
   function sizeBoard(){
     const stage = document.querySelector('.stage');
     if (!stage) return;
