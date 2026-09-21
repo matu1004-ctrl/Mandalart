@@ -76,19 +76,24 @@
     padding:0 6px;
   }
 
-  /* floating menu (usable while a cell is focused / keyboard open) */
-  .fab-wrap{
-    position:fixed;
-    left:max(12px, env(safe-area-inset-left));
-    right:max(12px, env(safe-area-inset-right));
-    bottom:calc(88px + env(safe-area-inset-bottom) + var(--fab-keyboard-offset, 0px));
+  /* bottom dock: selection bar + main button (in document flow, never overlaps board) */
+  .bottom-dock{
+    flex:0 0 auto;
+    display:flex;
+    flex-direction:column;
+    gap:8px;
+    padding:0 max(12px, env(safe-area-inset-left)) calc(10px + env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-right));
+    transform:translateY(calc(-1 * var(--fab-keyboard-offset, 0px)));
+    transition:transform .12s ease;
     z-index:50;
+  }
+  .fab-wrap{
+    position:relative;
     display:flex;
     flex-direction:column;
     align-items:stretch;
     gap:8px;
     pointer-events:none;
-    transition:bottom .12s ease;
   }
   .fab-wrap > *{ pointer-events:auto; }
   .fab-bar{
@@ -156,7 +161,7 @@
   /* board area */
   .stage{
     flex:1; display:flex; align-items:center; justify-content:center;
-    padding:14px; min-height:0; overflow:hidden;
+    padding:clamp(8px, 2vw, 14px); min-height:0; overflow:hidden;
   }
   .board{
     aspect-ratio:1/1;
@@ -300,7 +305,7 @@
   /* bottom bar / big button */
   .bottombar{
     flex:0 0 auto;
-    padding: 10px 14px calc(10px + env(safe-area-inset-bottom));
+    padding:0;
   }
   .bigBtn{
     width:100%;
@@ -416,32 +421,33 @@
   </div>
 </div>
 
-<div class="fab-wrap" id="fabWrap">
-  <div class="fab-menu" id="menu">
-    <button type="button" id="exportBtn">書き出す（テキスト）</button>
-    <button type="button" id="exportMdBtn">書き出す（Markdown）</button>
-    <button type="button" id="exportWfBtn">書き出す（Workflowy）</button>
-    <button type="button" id="importOutlineBtn">アウトラインを取り込む</button>
-    <button type="button" id="fillTemplateBtn">テンプレートを入れる</button>
-    <button type="button" id="styleBtn">文字スタイル</button>
-    <button type="button" id="resetBtn">クリア</button>
-  </div>
-  <div class="fab-bar" id="fabBar">
-    <div class="fab-target" id="fabTarget"></div>
-    <button type="button" class="fab-btn" id="fabMenuBtn" aria-label="メニュー">⋯</button>
-  </div>
-</div>
-
 <div class="fmt-bar" id="fmtBar">
   <button type="button" id="fmtBold" aria-label="太字"><b>B</b></button>
   <button type="button" id="fmtUnderline" aria-label="下線"><u>U</u></button>
 </div>
 
-<div class="bottombar">
-  <button class="bigBtn" id="bigBtn">
-    <span class="main" id="bigBtnMain">長文モード</span>
-    <span class="sub" id="bigBtnSub">押しながらセルへドラッグして開く</span>
-  </button>
+<div class="bottom-dock" id="bottomDock">
+  <div class="fab-wrap" id="fabWrap">
+    <div class="fab-menu" id="menu">
+      <button type="button" id="exportBtn">書き出す（テキスト）</button>
+      <button type="button" id="exportMdBtn">書き出す（Markdown）</button>
+      <button type="button" id="exportWfBtn">書き出す（Workflowy）</button>
+      <button type="button" id="importOutlineBtn">アウトラインを取り込む</button>
+      <button type="button" id="fillTemplateBtn">テンプレートを入れる</button>
+      <button type="button" id="styleBtn">文字スタイル</button>
+      <button type="button" id="resetBtn">クリア</button>
+    </div>
+    <div class="fab-bar" id="fabBar">
+      <div class="fab-target" id="fabTarget"></div>
+      <button type="button" class="fab-btn" id="fabMenuBtn" aria-label="メニュー">⋯</button>
+    </div>
+  </div>
+  <div class="bottombar">
+    <button class="bigBtn" id="bigBtn">
+      <span class="main" id="bigBtnMain">長文モード</span>
+      <span class="sub" id="bigBtnSub">押しながらセルへドラッグして開く</span>
+    </button>
+  </div>
 </div>
 
 <div class="modal-overlay" id="modalOverlay">
@@ -1878,13 +1884,22 @@
   function sizeBoard(){
     const stage = document.querySelector('.stage');
     if (!stage) return;
-    const size = Math.max(0, Math.min(stage.clientWidth, stage.clientHeight));
+    const style = getComputedStyle(stage);
+    const padX = parseFloat(style.paddingLeft) + parseFloat(style.paddingRight);
+    const padY = parseFloat(style.paddingTop) + parseFloat(style.paddingBottom);
+    const availW = stage.clientWidth - padX;
+    const availH = stage.clientHeight - padY;
+    const size = Math.max(0, Math.min(availW, availH));
     boardEl.style.width = size + 'px';
     boardEl.style.height = size + 'px';
   }
   window.addEventListener('resize', sizeBoard);
   window.addEventListener('orientationchange', sizeBoard);
   sizeBoard();
+  const stageEl = document.querySelector('.stage');
+  if (stageEl && window.ResizeObserver){
+    new ResizeObserver(sizeBoard).observe(stageEl);
+  }
   // layout can shift slightly after the first paint (fonts, safe-area insets settling),
   // so re-measure a couple of times shortly after load to make sure the square is accurate
   requestAnimationFrame(() => requestAnimationFrame(sizeBoard));
