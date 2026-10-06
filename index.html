@@ -1604,9 +1604,23 @@
     }
   }
 
+  // Selected cell is the export root. Center uses this board's ring;
+  // any other cell uses the nested board opened from that cell.
+  function exportScope(){
+    captureFocusedCell();
+    const node = currentNode();
+    let c = lastFocusedCellC;
+    if (typeof c !== 'number' || c < 0 || c > 8) c = 4;
+    if (c === 4) return { node, c, body: node };
+    return { node, c, body: node.children[c] };
+  }
+
   function buildExportText(){
+    const scope = exportScope();
+    const title = cellDisplay(scope.node.cells[scope.c]) || '(未入力)';
     let out = '=== マンダラート ===\n\n';
-    out += `中心ゴール: ${cellDisplay(root.cells[4]) || '(未入力)'}\n\n`;
+    out += `${cellRoleLabel(scope.c)}: ${title}\n\n`;
+    if (!scope.body) return out;
     function renderDetails(node, depth){
       let s = '';
       RING_ORDER.forEach((idx) => {
@@ -1617,16 +1631,21 @@
       return s;
     }
     RING_ORDER.forEach((themeIdx, i) => {
-      const theme = cellDisplay(root.cells[themeIdx]) || `(未入力)`;
-      out += `◆ テーマ${i + 1}: ${theme}\n`;
-      if (root.children[themeIdx]) out += renderDetails(root.children[themeIdx], 1);
+      const theme = cellDisplay(scope.body.cells[themeIdx]);
+      const child = scope.body.children[themeIdx];
+      if (!theme && !child) return;
+      out += `◆ ${i + 1}: ${theme || '(未入力)'}\n`;
+      if (child) out += renderDetails(child, 1);
       out += '\n';
     });
     return out;
   }
 
   function buildMarkdownText(){
-    let out = `# ${htmlToMarkdownInline(root.cells[4]) || '目標'}\n\n`;
+    const scope = exportScope();
+    const title = htmlToMarkdownInline(scope.node.cells[scope.c]) || '目標';
+    let out = `# ${title}\n\n`;
+    if (!scope.body) return out;
     function renderDetails(node, indent){
       let s = '';
       RING_ORDER.forEach((idx) => {
@@ -1636,18 +1655,22 @@
       });
       return s;
     }
-    RING_ORDER.forEach((themeIdx, i) => {
-      const theme = htmlToMarkdownInline(root.cells[themeIdx]) || `テーマ ${i + 1}`;
-      out += `## ${theme}\n`;
-      if (root.children[themeIdx]) out += renderDetails(root.children[themeIdx], 0);
+    RING_ORDER.forEach((themeIdx) => {
+      const theme = htmlToMarkdownInline(scope.body.cells[themeIdx]);
+      const child = scope.body.children[themeIdx];
+      if (!theme && !child) return;
+      out += `## ${theme || '（未入力）'}\n`;
+      if (child) out += renderDetails(child, 0);
       out += '\n';
     });
     return out;
   }
 
   function buildWorkflowyText(){
-    const goal = cellDisplay(root.cells[4]);
+    const scope = exportScope();
+    const goal = cellDisplay(scope.node.cells[scope.c]);
     let out = `- ${goal || '目標'}\n`;
+    if (!scope.body) return out;
     function renderDetails(node, depth){
       let s = '';
       RING_ORDER.forEach((idx) => {
@@ -1660,8 +1683,8 @@
       return s;
     }
     RING_ORDER.forEach((themeIdx, i) => {
-      const theme = cellDisplay(root.cells[themeIdx]);
-      const child = root.children[themeIdx];
+      const theme = cellDisplay(scope.body.cells[themeIdx]);
+      const child = scope.body.children[themeIdx];
       const childLines = child ? renderDetails(child, 2) : '';
       if (!theme && !childLines) return;
       out += `  - ${theme || `テーマ ${i + 1}`}\n`;
@@ -1670,20 +1693,23 @@
     return out;
   }
 
-  document.getElementById('exportBtn').addEventListener('pointerup', () => {
+  function openExport(text){
+    const scope = exportScope();
     closeMenu();
-    exportArea.value = buildExportText();
+    const h2 = overlay.querySelector('h2');
+    if (h2) h2.textContent = cellRoleLabel(scope.c) + ' 以下を書き出し';
+    exportArea.value = text;
     overlay.classList.add('open');
+  }
+
+  document.getElementById('exportBtn').addEventListener('pointerup', () => {
+    openExport(buildExportText());
   });
   document.getElementById('exportMdBtn').addEventListener('pointerup', () => {
-    closeMenu();
-    exportArea.value = buildMarkdownText();
-    overlay.classList.add('open');
+    openExport(buildMarkdownText());
   });
   document.getElementById('exportWfBtn').addEventListener('pointerup', () => {
-    closeMenu();
-    exportArea.value = buildWorkflowyText();
-    overlay.classList.add('open');
+    openExport(buildWorkflowyText());
   });
   document.getElementById('importOutlineBtn').addEventListener('pointerup', () => {
     openPasteModal();
