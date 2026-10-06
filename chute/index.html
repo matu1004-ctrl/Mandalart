@@ -1136,27 +1136,30 @@
     const text = cellText(value).replace(TIME_PREFIX_RE, '').replace(/^\n/, '');
     if (!range) return text;
     const prefix = clock(range.start) + ' - ' + clock(range.end);
-    return text ? prefix + '\n' + text : prefix;
+    return text ? prefix + ' ' + text : prefix;
   }
 
   function writeCellText(node, c, range){
     const next = withTimePrefix(node.cells[c], range);
-    if (cellText(node.cells[c]) === next) return;
+    if (cellText(node.cells[c]) === next) return false;
     node.cells[c] = next;
+    return true;
   }
 
   function refreshTimePrefixes(node){
-    if (!node) return;
+    if (!node) return false;
     const today = todayKey(Date.now());
+    let changed = false;
     RING_ORDER.forEach((idx) => {
-      if (node.children[idx]) refreshTimePrefixes(node.children[idx]);
+      if (node.children[idx] && refreshTimePrefixes(node.children[idx])) changed = true;
     });
     RING_ORDER.forEach((idx) => {
       const range = cellRange(node, idx, today);
-      writeCellText(node, idx, range);
-      if (node.children[idx]) writeCellText(node.children[idx], 4, range);
+      if (writeCellText(node, idx, range)) changed = true;
+      if (node.children[idx] && writeCellText(node.children[idx], 4, range)) changed = true;
     });
-    writeCellText(node, 4, boardChildrenRange(node, today));
+    if (writeCellText(node, 4, boardChildrenRange(node, today))) changed = true;
+    return changed;
   }
 
   function stopEntries(entries){
@@ -2352,6 +2355,7 @@
   loadStyleSettings();
   loadTime();
   loadData();
+  if (refreshTimePrefixes(root)) scheduleSave();
   paintTimeNow();
   setInterval(paintTimeNow, 1000);
   updateFabTargetLabel();
