@@ -267,12 +267,17 @@
   .cell.center .cell-editor{ font-weight:700; }
   .cell-editor{ padding-bottom:32px; }
   body.solo-edit .bottom-dock{ display:none; }
-  body.solo-edit .board{ display:block; }
+  body.solo-edit .board{
+    display:block;
+    aspect-ratio:auto;
+  }
   body.solo-edit .cell{ display:none; }
   body.solo-edit .cell.editing{
     display:block;
-    width:100%;
-    height:100%;
+    position:absolute;
+    inset:0;
+    width:auto;
+    height:auto;
   }
   body.solo-edit .cell.editing .cell-editor-wrap{
     top:0;
@@ -282,8 +287,9 @@
     transform:none;
   }
   body.solo-edit .cell.editing .cell-editor{
-    font-size:var(--cell-font-size);
-    padding:16px 16px 48px;
+    font-size:18px;
+    line-height:1.45;
+    padding:18px 16px 64px;
   }
   .time-btn{
     position:absolute;
@@ -1287,6 +1293,11 @@
   }
 
   function render(){
+    if (document.body.classList.contains('solo-edit')){
+      document.body.classList.remove('solo-edit');
+      soloEditor = null;
+      soloHold = false;
+    }
     const node = currentNode();
     // title / back button
     if (atRoot()){
@@ -1349,17 +1360,26 @@
         wrap.classList.add('is-focused');
         cellEl.classList.add('editing');
         ta.style.pointerEvents = 'auto';
-        setSoloEdit(true);
+        if (isPhoneLayout() && phoneEditArmed) enterSolo(cellEl);
       });
       ta.addEventListener('blur', () => {
         wrap.classList.remove('is-focused');
-        cellEl.classList.remove('editing');
-        ta.style.pointerEvents = 'none';
+        const keepOpen = document.body.classList.contains('solo-edit') && soloEditor === ta;
+        if (!keepOpen){
+          cellEl.classList.remove('editing');
+          ta.style.pointerEvents = 'none';
+        }
         syncFillState();
         setTimeout(() => {
+          if (!document.body.classList.contains('solo-edit')) return;
           const active = document.activeElement;
-          if (!active || !active.classList || !active.classList.contains('cell-editor')) setSoloEdit(false);
-        }, 30);
+          if (active && active.classList && active.classList.contains('cell-editor')) return;
+          if (soloHold && soloEditor && document.body.contains(soloEditor) && (Date.now() - soloEnteredAt) < 800){
+            soloEditor.focus();
+            return;
+          }
+          leaveSolo();
+        }, 200);
       });
       ta.addEventListener('input', () => {
         node.cells[c] = readValue();
@@ -1499,19 +1519,20 @@
 
       if (wasReady){
         if (canExpand(c)){
+          leaveSolo();
           expand(c);
           return;
         }
         // center cell at root (etc.): long-press isn't navigation — fall through to edit
       }
 
-      if (!isEditing()){
-        if (bigButtonHeld){
-          if (!longTextTarget) openLongText(c);
-          return;
-        }
-        ta.focus();
+      if (!isEditing() && bigButtonHeld){
+        if (!longTextTarget) openLongText(c);
+        return;
       }
+      phoneEditArmed = true;
+      if (isPhoneLayout()) enterSolo(cellEl);
+      if (!isEditing()) ta.focus();
     }
 
     function onCancel(){
@@ -1667,10 +1688,36 @@
 
   // Keep floating menu above the iOS keyboard (visualViewport)
   const fabWrap = document.getElementById('fabWrap');
-  let userStartedEdit = false;
-  function setSoloEdit(on){
-    const narrow = window.matchMedia('(max-width: 767px)').matches;
-    document.body.classList.toggle('solo-edit', !!(on && narrow && userStartedEdit));
+  let soloEditor = null;
+  let soloHold = false;
+  let soloEnteredAt = 0;
+  let phoneEditArmed = false;
+  function isPhoneLayout(){
+    return window.matchMedia('(max-width: 900px)').matches;
+  }
+  function enterSolo(cellEl){
+    if (!isPhoneLayout() || !cellEl) return;
+    boardEl.querySelectorAll('.cell.editing').forEach((el) => {
+      if (el !== cellEl) el.classList.remove('editing');
+    });
+    cellEl.classList.add('editing');
+    const editor = cellEl.querySelector('.cell-editor');
+    if (editor){
+      editor.style.pointerEvents = 'auto';
+      soloEditor = editor;
+    }
+    soloHold = true;
+    soloEnteredAt = Date.now();
+    document.body.classList.add('solo-edit');
+    syncFabToViewport();
+  }
+  function leaveSolo(){
+    soloEditor = null;
+    soloHold = false;
+    document.body.classList.remove('solo-edit');
+    if (boardEl){
+      boardEl.querySelectorAll('.cell.editing').forEach((el) => el.classList.remove('editing'));
+    }
     syncFabToViewport();
   }
   function syncFabToViewport(){
@@ -1692,7 +1739,15 @@
     if (document.body.style.height !== nextHeight) document.body.style.height = nextHeight;
     if (typeof sizeBoard === 'function') sizeBoard();
   }
-  document.addEventListener('pointerdown', () => { userStartedEdit = true; });
+  document.addEventListener('pointerdown', (e) => {
+    if (e.target.closest && e.target.closest('.cell')) phoneEditArmed = true;
+    if (!document.body.classList.contains('solo-edit')) return;
+    if (e.target.closest && e.target.closest('.cell, .fmt-bar')) return;
+    soloHold = false;
+    const active = document.activeElement;
+    leaveSolo();
+    if (active && active.blur) active.blur();
+  });
   if (window.visualViewport){
     visualViewport.addEventListener('resize', syncFabToViewport);
     visualViewport.addEventListener('scroll', syncFabToViewport);
@@ -2409,10 +2464,12 @@
     const availW = stage.clientWidth - padX;
     const availH = stage.clientHeight - padY;
     if (document.body.classList.contains('solo-edit')){
+      boardEl.style.aspectRatio = 'auto';
       boardEl.style.width = Math.max(0, availW) + 'px';
       boardEl.style.height = Math.max(0, availH) + 'px';
       return;
     }
+    boardEl.style.aspectRatio = '';
     const size = Math.max(0, Math.min(availW, availH));
     boardEl.style.width = size + 'px';
     boardEl.style.height = size + 'px';
