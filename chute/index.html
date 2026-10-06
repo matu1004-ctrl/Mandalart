@@ -609,7 +609,7 @@
   // expanded into a child node (created lazily), which itself can be expanded further,
   // to any depth. The child's center cell always mirrors the parent's cell that opened it.
   function makeNode(){
-    return { cells: Array(9).fill(''), children: new Array(9).fill(null), timeIds: Array(9).fill(null) };
+    return { cells: Array(9).fill(''), children: new Array(9).fill(null), timeIds: Array(9).fill(null), nodeId: null };
   }
   let root = makeNode();
   // navPath: [{node, idx}] from root (idx=null) down to the node currently on screen.
@@ -953,7 +953,7 @@
     document.addEventListener('pointercancel', onDragCancel);
   }
 
-  let timeState = { running: null, logs: [] };
+  let timeState = { running: [], logs: [] };
 
   function loadTime(){
     try{
@@ -961,7 +961,13 @@
       if (!raw) return;
       const parsed = JSON.parse(raw);
       if (!parsed || typeof parsed !== 'object') return;
-      timeState.running = parsed.running && parsed.running.timeId ? parsed.running : null;
+      if (Array.isArray(parsed.running)){
+        timeState.running = parsed.running.filter((run) => run && run.timeId && run.startMs);
+      } else if (parsed.running && parsed.running.timeId){
+        timeState.running = [parsed.running];
+      } else {
+        timeState.running = [];
+      }
       timeState.logs = Array.isArray(parsed.logs) ? parsed.logs.filter((log) => log && log.timeId && log.startMs) : [];
     }catch(e){}
   }
@@ -1019,6 +1025,21 @@
     return node.timeIds[c];
   }
 
+  function runningList(){
+    return Array.isArray(timeState.running) ? timeState.running : [];
+  }
+
+  function isTimeRunning(timeId){
+    return !!(timeId && runningList().some((run) => run.timeId === timeId));
+  }
+
+  function ensureNodeId(node){
+    if (!node.nodeId){
+      node.nodeId = 'nd-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
+    }
+    return node.nodeId;
+  }
+
   function todaySeconds(timeId, now){
     if (!timeId) return 0;
     const today = todayKey(now);
@@ -1026,52 +1047,92 @@
     timeState.logs.forEach((log) => {
       if (log.timeId === timeId && todayKey(log.startMs) === today) sec += Number(log.durationSec) || 0;
     });
-    const run = timeState.running;
-    if (run && run.timeId === timeId && todayKey(run.startMs) === today){
-      sec += Math.max(0, Math.floor((now - run.startMs) / 1000));
-    }
+    runningList().forEach((run) => {
+      if (run.timeId === timeId && todayKey(run.startMs) === today){
+        sec += Math.max(0, Math.floor((now - run.startMs) / 1000));
+      }
+    });
     return sec;
   }
 
-  function timeButtonLabel(timeId){
+  function ringSumSeconds(node, now){
+    let sec = 0;
+    RING_ORDER.forEach((idx) => {
+      const id = node.timeIds && node.timeIds[idx];
+      sec += todaySeconds(id, now);
+    });
+    return sec;
+  }
+
+  function ringIsLive(node){
+    return RING_ORDER.some((idx) => {
+      const id = node.timeIds && node.timeIds[idx];
+      return isTimeRunning(id);
+    });
+  }
+
+  function centerButtonLabel(node, now){
+    const sum = ringSumSeconds(node, now);
+    const centerId = cellTimeId(node, 4);
+    const centerRun = runningList().find((run) => centerId && run.timeId === centerId);
+    if (ringIsLive(node)) return formatDur(sum);
+    if (centerRun) return formatDur(Math.floor((now - centerRun.startMs) / 1000));
+    if (sum > 0) return formatMinutes(sum);
+    return '▶';
+  }
+
+  function timeButtonLabel(node, c){
     const now = Date.now();
-    const run = timeState.running;
-    if (run && timeId && run.timeId === timeId){
-      return formatDur(Math.floor((now - run.startMs) / 1000));
-    }
+    if (c === 4) return centerButtonLabel(node, now);
+    const timeId = cellTimeId(node, c);
+    const run = runningList().find((item) => timeId && item.timeId === timeId);
+    if (run) return formatDur(Math.floor((now - run.startMs) / 1000));
     const sec = todaySeconds(timeId, now);
     if (sec > 0) return formatMinutes(sec);
     return '▶';
   }
 
-  function stopRunning(){
-    const run = timeState.running;
-    if (!run) return;
+  function stopEntries(entries){
+    if (!entries || !entries.length) return;
+    const drop = new Set(entries);
     const stopMs = Date.now();
-    const durationSec = Math.max(0, Math.floor((stopMs - run.startMs) / 1000));
-    if (durationSec >= 1){
-      timeState.logs.push({
-        timeId: run.timeId,
-        title: run.title,
-        startMs: run.startMs,
-        stopMs: stopMs,
-        durationSec: durationSec
-      });
-    }
-    timeState.running = null;
+    entries.forEach((run) => {
+      const durationSec = Math.max(0, Math.floor((stopMs - run.startMs) / 1000));
+      if (durationSec >= 1){
+        timeState.logs.push({
+          timeId: run.timeId,
+          title: run.title,
+          startMs: run.startMs,
+          stopMs: stopMs,
+          durationSec: durationSec
+        });
+      }
+    });
+    timeState.running = runningList().filter((run) => !drop.has(run));
     saveTime();
+  }
+
+  function boardTimeIds(node){
+    const ids = [];
+    for (let i = 0; i < 9; i++){
+      const id = cellTimeId(node, i);
+      if (id) ids.push(id);
+    }
+    return ids;
   }
 
   function toggleCellTimer(c){
     const node = currentNode();
+    const nodeId = ensureNodeId(node);
     const existing = cellTimeId(node, c);
-    if (timeState.running && existing && timeState.running.timeId === existing){
-      stopRunning();
+    if (existing && isTimeRunning(existing)){
+      stopEntries(runningList().filter((run) => run.timeId === existing));
     } else {
+      const ids = new Set(boardTimeIds(node));
+      stopEntries(runningList().filter((run) => run.nodeId === nodeId || ids.has(run.timeId)));
       const id = ensureTimeId(node, c);
       const title = cellDisplay(node.cells[c]) || '（無題）';
-      stopRunning();
-      timeState.running = { timeId: id, title: title, startMs: Date.now() };
+      timeState.running.push({ timeId: id, nodeId: nodeId, cellIndex: c, title: title, startMs: Date.now() });
       saveTime();
       scheduleSave();
     }
@@ -1081,22 +1142,31 @@
 
   function paintTimeNow(){
     const el = document.getElementById('timeNow');
-    const run = timeState.running;
+    const runs = runningList();
     const now = Date.now();
+    const node = currentNode();
     if (el){
-      if (!run){
+      if (!runs.length){
         el.classList.remove('show');
         el.textContent = '';
       } else {
         el.classList.add('show');
-        el.textContent = formatDur(Math.floor((now - run.startMs) / 1000)) + '  ' + (run.title || '（無題）');
+        el.textContent = runs.map((run) => {
+          return formatDur(Math.floor((now - run.startMs) / 1000)) + '  ' + (run.title || '（無題）');
+        }).join('  ·  ');
       }
     }
     document.querySelectorAll('.time-btn').forEach((btn) => {
+      const c = Number(btn.dataset.c);
       const id = btn.dataset.timeId || '';
-      const running = !!(run && id && run.timeId === id);
-      btn.classList.toggle('is-running', running);
-      if (running) btn.textContent = formatDur(Math.floor((now - run.startMs) / 1000));
+      if (c === 4){
+        btn.textContent = centerButtonLabel(node, now);
+        btn.classList.toggle('is-running', isTimeRunning(cellTimeId(node, 4)));
+        return;
+      }
+      const run = runningList().find((item) => id && item.timeId === id);
+      btn.classList.toggle('is-running', !!run);
+      if (run) btn.textContent = formatDur(Math.floor((now - run.startMs) / 1000));
     });
   }
 
@@ -1104,18 +1174,19 @@
     const now = Date.now();
     const today = todayKey(now);
     const lines = timeState.logs.filter((log) => todayKey(log.startMs) === today);
+    const runs = runningList().filter((run) => todayKey(run.startMs) === today);
     let out = today + '\n\n';
-    if (!lines.length && !timeState.running) return out + '今日の記録はまだありません。\n';
+    if (!lines.length && !runs.length) return out + '今日の記録はまだありません。\n';
     let total = 0;
     lines.forEach((log) => {
       total += Number(log.durationSec) || 0;
       out += clock(log.startMs) + '–' + clock(log.stopMs) + '  ' + formatMinutes(log.durationSec) + '  ' + (log.title || '（無題）') + '\n';
     });
-    if (timeState.running && todayKey(timeState.running.startMs) === today){
-      const sec = Math.max(0, Math.floor((now - timeState.running.startMs) / 1000));
+    runs.forEach((run) => {
+      const sec = Math.max(0, Math.floor((now - run.startMs) / 1000));
       total += sec;
-      out += clock(timeState.running.startMs) + '–  ' + formatMinutes(sec) + '  ' + (timeState.running.title || '（無題）') + '（記録中）\n';
-    }
+      out += clock(run.startMs) + '–  ' + formatMinutes(sec) + '  ' + (run.title || '（無題）') + '（記録中）\n';
+    });
     out += '\n合計 ' + formatMinutes(total) + '\n';
     return out;
   }
@@ -1205,8 +1276,12 @@
       timeBtn.dataset.c = String(c);
       const timeId = cellTimeId(node, c);
       if (timeId) timeBtn.dataset.timeId = timeId;
-      timeBtn.textContent = timeButtonLabel(timeId);
-      if (timeState.running && timeId && timeState.running.timeId === timeId) timeBtn.classList.add('is-running');
+      timeBtn.textContent = timeButtonLabel(node, c);
+      if (c === 4){
+        if (isTimeRunning(cellTimeId(node, 4))) timeBtn.classList.add('is-running');
+      } else if (timeId && isTimeRunning(timeId)){
+        timeBtn.classList.add('is-running');
+      }
       timeBtn.addEventListener('pointerdown', (e) => {
         e.preventDefault();
         e.stopPropagation();
@@ -1385,6 +1460,7 @@
         node.timeIds[i] = typeof raw.timeIds[i] === 'string' && raw.timeIds[i] ? raw.timeIds[i] : null;
       }
     }
+    if (raw && typeof raw.nodeId === 'string' && raw.nodeId) node.nodeId = raw.nodeId;
     if (raw && Array.isArray(raw.children)){
       for (let i = 0; i < 9; i++){
         if (raw.children[i]) node.children[i] = normalizeNode(raw.children[i]);
@@ -2074,8 +2150,9 @@
   });
   document.getElementById('timeNow').addEventListener('pointerup', (e) => {
     e.preventDefault();
-    if (!timeState.running) return;
-    stopRunning();
+    const runs = runningList();
+    if (!runs.length) return;
+    stopEntries([runs[runs.length - 1]]);
     render();
     paintTimeNow();
   });
