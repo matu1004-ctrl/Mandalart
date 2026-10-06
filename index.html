@@ -1615,27 +1615,50 @@
     return { node, c, body: node.children[c] };
   }
 
+  const EMPTY_CELL_MARK = '・';
+
+  function exportPlain(html){
+    return String(cellDisplay(html) || '').trim();
+  }
+
+  // Keep every ring slot up to the last filled cell. A blank in the middle
+  // becomes 「・」 when its parent cell exists, so later items stay in place.
+  function ringSlots(node, textOf, padGaps){
+    const slots = RING_ORDER.map((idx) => {
+      const text = String(textOf(node.cells[idx]) || '').trim();
+      return { text, child: node.children[idx], blank: !text };
+    });
+    let last = -1;
+    slots.forEach((slot, i) => {
+      if (slot.text || slot.child) last = i;
+    });
+    if (last < 0) return [];
+    const kept = padGaps ? slots.slice(0, last + 1) : slots.filter((slot) => slot.text || slot.child);
+    return kept.map((slot) => ({
+      text: slot.text || EMPTY_CELL_MARK,
+      child: slot.child,
+      blank: !slot.text
+    }));
+  }
+
   function buildExportText(){
     const scope = exportScope();
-    const title = cellDisplay(scope.node.cells[scope.c]) || '(未入力)';
+    const title = exportPlain(scope.node.cells[scope.c]) || '(未入力)';
     let out = '=== マンダラート ===\n\n';
     out += `${cellRoleLabel(scope.c)}: ${title}\n\n`;
     if (!scope.body) return out;
+    const pad = !!exportPlain(scope.node.cells[scope.c]);
     function renderDetails(node, depth){
       let s = '';
-      RING_ORDER.forEach((idx) => {
-        const val = cellDisplay(node.cells[idx]);
-        if (val) s += '  '.repeat(depth) + `・${val}\n`;
-        if (node.children[idx]) s += renderDetails(node.children[idx], depth + 1);
+      ringSlots(node, exportPlain, true).forEach((slot) => {
+        s += '  '.repeat(depth) + (slot.blank ? `・ ${EMPTY_CELL_MARK}\n` : `・${slot.text}\n`);
+        if (slot.child) s += renderDetails(slot.child, depth + 1);
       });
       return s;
     }
-    RING_ORDER.forEach((themeIdx, i) => {
-      const theme = cellDisplay(scope.body.cells[themeIdx]);
-      const child = scope.body.children[themeIdx];
-      if (!theme && !child) return;
-      out += `◆ ${i + 1}: ${theme || '(未入力)'}\n`;
-      if (child) out += renderDetails(child, 1);
+    ringSlots(scope.body, exportPlain, pad).forEach((slot, i) => {
+      out += `◆ ${i + 1}: ${slot.text}\n`;
+      if (slot.child) out += renderDetails(slot.child, 1);
       out += '\n';
     });
     return out;
@@ -1643,24 +1666,21 @@
 
   function buildMarkdownText(){
     const scope = exportScope();
-    const title = htmlToMarkdownInline(scope.node.cells[scope.c]) || '目標';
+    const title = String(htmlToMarkdownInline(scope.node.cells[scope.c]) || '').trim() || '目標';
     let out = `# ${title}\n\n`;
     if (!scope.body) return out;
+    const pad = !!exportPlain(scope.node.cells[scope.c]);
     function renderDetails(node, indent){
       let s = '';
-      RING_ORDER.forEach((idx) => {
-        const val = htmlToMarkdownInline(node.cells[idx]);
-        if (val) s += '  '.repeat(indent) + `- ${val}\n`;
-        if (node.children[idx]) s += renderDetails(node.children[idx], indent + 1);
+      ringSlots(node, htmlToMarkdownInline, true).forEach((slot) => {
+        s += '  '.repeat(indent) + `- ${slot.text}\n`;
+        if (slot.child) s += renderDetails(slot.child, indent + 1);
       });
       return s;
     }
-    RING_ORDER.forEach((themeIdx) => {
-      const theme = htmlToMarkdownInline(scope.body.cells[themeIdx]);
-      const child = scope.body.children[themeIdx];
-      if (!theme && !child) return;
-      out += `## ${theme || '（未入力）'}\n`;
-      if (child) out += renderDetails(child, 0);
+    ringSlots(scope.body, htmlToMarkdownInline, pad).forEach((slot) => {
+      out += `## ${slot.text}\n`;
+      if (slot.child) out += renderDetails(slot.child, 0);
       out += '\n';
     });
     return out;
@@ -1668,27 +1688,21 @@
 
   function buildWorkflowyText(){
     const scope = exportScope();
-    const goal = cellDisplay(scope.node.cells[scope.c]);
+    const goal = exportPlain(scope.node.cells[scope.c]);
     let out = `- ${goal || '目標'}\n`;
     if (!scope.body) return out;
+    const pad = !!goal;
     function renderDetails(node, depth){
       let s = '';
-      RING_ORDER.forEach((idx) => {
-        const val = cellDisplay(node.cells[idx]);
-        const child = node.children[idx];
-        if (!val && !child) return;
-        s += '  '.repeat(depth) + `- ${val}\n`;
-        if (child) s += renderDetails(child, depth + 1);
+      ringSlots(node, exportPlain, true).forEach((slot) => {
+        s += '  '.repeat(depth) + `- ${slot.text}\n`;
+        if (slot.child) s += renderDetails(slot.child, depth + 1);
       });
       return s;
     }
-    RING_ORDER.forEach((themeIdx, i) => {
-      const theme = cellDisplay(scope.body.cells[themeIdx]);
-      const child = scope.body.children[themeIdx];
-      const childLines = child ? renderDetails(child, 2) : '';
-      if (!theme && !childLines) return;
-      out += `  - ${theme || `テーマ ${i + 1}`}\n`;
-      out += childLines;
+    ringSlots(scope.body, exportPlain, pad).forEach((slot) => {
+      out += `  - ${slot.text}\n`;
+      if (slot.child) out += renderDetails(slot.child, 2);
     });
     return out;
   }
