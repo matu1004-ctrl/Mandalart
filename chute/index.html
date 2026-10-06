@@ -1092,13 +1092,82 @@
     return '▶';
   }
 
+  const TIME_PREFIX_RE = /^\d{1,2}:\d{2}\s*[-–—]\s*\d{1,2}:\d{2}(?:[ \t]*\n|[ \t]+)?/;
+
+  function logsRange(timeId, today){
+    if (!timeId) return null;
+    let start = Infinity;
+    let end = -Infinity;
+    let any = false;
+    timeState.logs.forEach((log) => {
+      if (log.timeId !== timeId || todayKey(log.startMs) !== today) return;
+      any = true;
+      start = Math.min(start, log.startMs);
+      end = Math.max(end, log.stopMs);
+    });
+    return any ? { start: start, end: end } : null;
+  }
+
+  function boardChildrenRange(node, today){
+    let start = Infinity;
+    let end = -Infinity;
+    let any = false;
+    RING_ORDER.forEach((idx) => {
+      const range = cellRange(node, idx, today);
+      if (!range) return;
+      any = true;
+      start = Math.min(start, range.start);
+      end = Math.max(end, range.end);
+    });
+    return any ? { start: start, end: end } : null;
+  }
+
+  function cellRange(node, c, today){
+    const child = node.children && node.children[c];
+    if (child){
+      const nested = boardChildrenRange(child, today);
+      if (nested) return nested;
+    }
+    const id = node.timeIds && node.timeIds[c];
+    return logsRange(id, today);
+  }
+
+  function withTimePrefix(value, range){
+    const text = cellText(value).replace(TIME_PREFIX_RE, '').replace(/^\n/, '');
+    if (!range) return text;
+    const prefix = clock(range.start) + ' - ' + clock(range.end);
+    return text ? prefix + '\n' + text : prefix;
+  }
+
+  function writeCellText(node, c, range){
+    const next = withTimePrefix(node.cells[c], range);
+    if (cellText(node.cells[c]) === next) return;
+    node.cells[c] = next;
+  }
+
+  function refreshTimePrefixes(node){
+    if (!node) return;
+    const today = todayKey(Date.now());
+    RING_ORDER.forEach((idx) => {
+      if (node.children[idx]) refreshTimePrefixes(node.children[idx]);
+    });
+    RING_ORDER.forEach((idx) => {
+      const range = cellRange(node, idx, today);
+      writeCellText(node, idx, range);
+      if (node.children[idx]) writeCellText(node.children[idx], 4, range);
+    });
+    writeCellText(node, 4, boardChildrenRange(node, today));
+  }
+
   function stopEntries(entries){
     if (!entries || !entries.length) return;
     const drop = new Set(entries);
     const stopMs = Date.now();
+    let recorded = false;
     entries.forEach((run) => {
       const durationSec = Math.max(0, Math.floor((stopMs - run.startMs) / 1000));
       if (durationSec >= 1){
+        recorded = true;
         timeState.logs.push({
           timeId: run.timeId,
           title: run.title,
@@ -1110,6 +1179,10 @@
     });
     timeState.running = runningList().filter((run) => !drop.has(run));
     saveTime();
+    if (recorded){
+      refreshTimePrefixes(root);
+      scheduleSave();
+    }
   }
 
   function boardTimeIds(node){
@@ -1131,7 +1204,7 @@
       const ids = new Set(boardTimeIds(node));
       stopEntries(runningList().filter((run) => run.nodeId === nodeId || ids.has(run.timeId)));
       const id = ensureTimeId(node, c);
-      const title = cellDisplay(node.cells[c]) || '（無題）';
+      const title = cellText(node.cells[c]).replace(TIME_PREFIX_RE, '').trim() || '（無題）';
       timeState.running.push({ timeId: id, nodeId: nodeId, cellIndex: c, title: title, startMs: Date.now() });
       saveTime();
       scheduleSave();
