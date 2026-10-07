@@ -110,8 +110,8 @@
     min-width:0;
     padding:10px 12px;
     border-radius:10px;
-    background:rgba(43,43,40,.92);
-    color:#fff;
+    background:#999;
+    color:var(--ink);
     font-size:14px !important;
     line-height:1.3;
     overflow:hidden;
@@ -150,13 +150,13 @@
   .fab-btn{
     flex-shrink:0;
     width:48px; height:48px; border:0; border-radius:50%;
-    background:#2b2b28; color:#fff;
+    background:#999; color:var(--ink);
     font-size:28px !important; line-height:1;
     box-shadow:0 8px 20px rgba(0,0,0,.25);
     cursor:pointer;
     display:flex; align-items:center; justify-content:center;
   }
-  .fab-btn:active{ background:var(--accent); }
+  .fab-btn:active{ background:var(--accent); color:#fff; }
 
   /* board area */
   .stage{
@@ -338,8 +338,8 @@
     gap:2px;
     padding:12px 10px;
     border:0; border-radius:14px;
-    background:#2b2b28;
-    color:#fff;
+    background:#999;
+    color:var(--ink);
     font-family:inherit;
     cursor:pointer;
     touch-action:none;
@@ -347,8 +347,8 @@
   }
   .bigBtn .main{ font-size:14px; font-weight:700; letter-spacing:.02em; }
   .bigBtn .sub{ font-size:10.5px; opacity:.75; }
-  .bigBtn.pressed{ background:var(--accent); transform:scale(0.99); }
-  .bigBtn.mode-close{ background:var(--accent); }
+  .bigBtn.pressed{ background:var(--accent); color:#fff; transform:scale(0.99); }
+  .bigBtn.mode-close{ background:var(--accent); color:#fff; }
 
   /* long-text focused writing view */
   .longtext{
