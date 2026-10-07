@@ -302,7 +302,7 @@
     padding:0 calc(var(--cell-font-size) * 0.55);
     border:0;
     border-radius:999px;
-    background:#999;
+    background:#b3b3b3;
     color:var(--ink);
     font-family:inherit;
     font-size:var(--cell-font-size);
@@ -314,6 +314,7 @@
     justify-content:center;
     white-space:nowrap;
   }
+  .time-btn.is-play{ color:#fff; }
   .time-btn.is-running{ background:var(--accent); color:#fff; }
   .title-stack{
     flex:1;
@@ -1299,7 +1300,9 @@
       const c = Number(btn.dataset.c);
       const id = btn.dataset.timeId || '';
       if (c === 4){
-        btn.textContent = centerButtonLabel(node, now);
+        const label = centerButtonLabel(node, now);
+        btn.textContent = label;
+        btn.classList.toggle('is-play', label === '▶');
         btn.classList.toggle('is-running', isTimeRunning(cellTimeId(node, 4)));
         return;
       }
@@ -1434,7 +1437,9 @@
       timeBtn.dataset.c = String(c);
       const timeId = cellTimeId(node, c);
       if (timeId) timeBtn.dataset.timeId = timeId;
-      timeBtn.textContent = timeButtonLabel(node, c);
+      const timeLabel = timeButtonLabel(node, c);
+      timeBtn.textContent = timeLabel;
+      if (timeLabel === '▶') timeBtn.classList.add('is-play');
       if (c === 4){
         if (isTimeRunning(cellTimeId(node, 4))) timeBtn.classList.add('is-running');
       } else if (timeId && isTimeRunning(timeId)){
