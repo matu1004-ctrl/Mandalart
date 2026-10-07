@@ -271,13 +271,22 @@
     display:block;
     aspect-ratio:auto;
   }
-  body.solo-edit .cell{ display:none; }
-  body.solo-edit .cell.editing{
-    display:block;
+  body.solo-edit .cell{
     position:absolute;
+    width:0;
+    height:0;
+    overflow:hidden;
+    visibility:hidden;
+    pointer-events:none;
+  }
+  body.solo-edit .cell.editing{
+    visibility:visible;
+    pointer-events:auto;
     inset:0;
     width:auto;
     height:auto;
+    overflow:hidden;
+    z-index:2;
   }
   body.solo-edit .cell.editing .cell-editor-wrap{
     top:0;
@@ -1334,10 +1343,12 @@
   }
 
   function render(){
-    if (document.body.classList.contains('solo-edit')){
+    const leftSolo = document.body.classList.contains('solo-edit');
+    if (leftSolo){
       document.body.classList.remove('solo-edit');
       soloEditor = null;
       soloHold = false;
+      if (boardEl) boardEl.style.display = 'grid';
     }
     const node = currentNode();
     // title / back button
@@ -1458,6 +1469,7 @@
       boardEl.appendChild(cellEl);
       attachGestures(cellEl, ta, c);
     }
+    if (leftSolo) settleGrid();
   }
 
   function canExpand(c){
@@ -1476,9 +1488,12 @@
       child.cells[4] = node.cells[c];
       navPath.push({ node: child, idx: c });
     }
+    lastFocusedCellC = 4;
     if (document.activeElement) document.activeElement.blur();
     hideFmtBar();
     render();
+    selectCell(4);
+    settleGrid();
     scheduleSave();
   }
 
@@ -1504,7 +1519,10 @@
     backBtn.classList.remove('longPressReady');
     if (backPressReady && !atRoot()){
       navPath = [navPath[0]];
+      lastFocusedCellC = 4;
       render();
+      selectCell(4);
+      settleGrid();
       scheduleSave();
     }
     backPressReady = false;
@@ -1751,8 +1769,24 @@
     }
     soloHold = true;
     soloEnteredAt = Date.now();
+    if (boardEl) boardEl.style.display = '';
     document.body.classList.add('solo-edit');
     syncFabToViewport();
+  }
+  function settleGrid(){
+    const paint = () => {
+      window.scrollTo(0, 0);
+      if (boardEl && !document.body.classList.contains('solo-edit')) boardEl.style.display = 'grid';
+      if (typeof sizeBoard === 'function') sizeBoard();
+      if (!boardEl) return;
+      boardEl.style.transform = 'translateZ(0)';
+      void boardEl.offsetWidth;
+      boardEl.style.transform = '';
+    };
+    paint();
+    requestAnimationFrame(() => requestAnimationFrame(paint));
+    setTimeout(paint, 60);
+    setTimeout(paint, 320);
   }
   function leaveSolo(){
     soloEditor = null;
@@ -1760,8 +1794,10 @@
     document.body.classList.remove('solo-edit');
     if (boardEl){
       boardEl.querySelectorAll('.cell.editing').forEach((el) => el.classList.remove('editing'));
+      boardEl.style.display = 'grid';
     }
     syncFabToViewport();
+    settleGrid();
   }
   function syncFabToViewport(){
     const vv = window.visualViewport;
@@ -2514,6 +2550,7 @@
     }
     boardEl.style.aspectRatio = '';
     const size = Math.max(0, Math.min(availW, availH));
+    if (size < 8) return;
     boardEl.style.width = size + 'px';
     boardEl.style.height = size + 'px';
   }
