@@ -1062,6 +1062,18 @@
     return Math.round(sec / 60) + '分';
   }
 
+  function formatSpent(sec){
+    sec = Math.max(0, Math.floor(sec));
+    const h = Math.floor(sec / 3600);
+    const m = Math.floor((sec % 3600) / 60);
+    const s = sec % 60;
+    let out = '';
+    if (h) out += h + '時間';
+    if (m) out += m + '分';
+    if (s || !out) out += s + '秒';
+    return out;
+  }
+
   function cellTimeId(node, c){
     if (c === 4 && !atRoot() && node === currentNode()){
       const parentEntry = navPath[navPath.length - 2];
@@ -1158,7 +1170,7 @@
     return '▶';
   }
 
-  const TIME_PREFIX_RE = /^\d{1,3}:\d{2}\s*[-–—]\s*\d{1,3}:\d{2}(?:[ \t]*\n|[ \t]+)?/;
+  const TIME_PREFIX_RE = /^\d{1,3}:\d{2}\s*[-–—]\s*\d{1,3}:\d{2}(?:[ \t]+(?:\d+時間(?:\d+分)?(?:\d+秒)?|\d+分(?:\d+秒)?|\d+秒))?(?:[ \t]*\n|[ \t]+)?/;
 
   function logCountsForDay(log, today){
     if (todayKey(log.startMs) === today) return true;
@@ -1201,26 +1213,63 @@
     return any ? { start: start, end: end } : null;
   }
 
-  function cellRange(node, c, today){
-    const child = node.children && node.children[c];
-    if (child){
-      const nested = boardChildrenRange(child, today);
-      if (nested) return nested;
-    }
-    const id = node.timeIds && node.timeIds[c];
-    return logsRange(id, today);
+  function mergeRange(a, b){
+    if (a && b) return { start: Math.min(a.start, b.start), end: Math.max(a.end, b.end) };
+    return a || b || null;
   }
 
-  function withTimePrefix(value, range){
+  function cellRange(node, c, today){
+    const child = node.children && node.children[c];
+    const nested = child ? boardChildrenRange(child, today) : null;
+    const id = node.timeIds && node.timeIds[c];
+    return mergeRange(nested, logsRange(id, today));
+  }
+
+  function withTimePrefix(value, range, seconds){
     const raw = cellText(value);
     if (!range) return raw;
     const text = raw.replace(TIME_PREFIX_RE, '').replace(/^\n/, '');
-    const prefix = clockSpan(range.start, range.end);
+    let prefix = clockSpan(range.start, range.end);
+    if (seconds > 0) prefix += ' ' + formatSpent(seconds);
     return text ? prefix + ' ' + text : prefix;
   }
 
-  function writeCellText(node, c, range){
-    const next = withTimePrefix(node.cells[c], range);
+  function loggedSeconds(timeId, now){
+    if (!timeId) return 0;
+    const today = todayKey(now);
+    let sec = 0;
+    timeState.logs.forEach((log) => {
+      if (log.timeId === timeId && logCountsForDay(log, today)) sec += Number(log.durationSec) || 0;
+    });
+    runningList().forEach((run) => {
+      if (run.timeId !== timeId) return;
+      sec += Math.max(0, Math.floor((now - run.startMs) / 1000));
+    });
+    return sec;
+  }
+
+  function ringMeasuredSeconds(node, now){
+    if (!node) return 0;
+    let sec = 0;
+    RING_ORDER.forEach((idx) => {
+      const id = node.timeIds && node.timeIds[idx];
+      sec += loggedSeconds(id, now);
+      const child = node.children && node.children[idx];
+      if (child) sec += ringMeasuredSeconds(child, now);
+    });
+    return sec;
+  }
+
+  function cellRecordedSeconds(node, c, now){
+    const id = (node.timeIds && node.timeIds[c]) || '';
+    let sec = loggedSeconds(id, now);
+    if (c === 4) sec += ringMeasuredSeconds(node, now);
+    else if (node.children && node.children[c]) sec += ringMeasuredSeconds(node.children[c], now);
+    return sec;
+  }
+
+  function writeCellText(node, c, range, seconds){
+    const next = withTimePrefix(node.cells[c], range, seconds);
     if (cellText(node.cells[c]) === next) return false;
     node.cells[c] = next;
     return true;
@@ -1228,17 +1277,21 @@
 
   function refreshTimePrefixes(node){
     if (!node) return false;
-    const today = todayKey(Date.now());
+    const now = Date.now();
+    const today = todayKey(now);
     let changed = false;
     RING_ORDER.forEach((idx) => {
       if (node.children[idx] && refreshTimePrefixes(node.children[idx])) changed = true;
     });
     RING_ORDER.forEach((idx) => {
       const range = cellRange(node, idx, today);
-      if (writeCellText(node, idx, range)) changed = true;
-      if (node.children[idx] && writeCellText(node.children[idx], 4, range)) changed = true;
+      const sec = cellRecordedSeconds(node, idx, now);
+      if (writeCellText(node, idx, range, sec)) changed = true;
+      if (node.children[idx] && writeCellText(node.children[idx], 4, range, sec)) changed = true;
     });
-    if (writeCellText(node, 4, boardChildrenRange(node, today))) changed = true;
+    const centerSec = cellRecordedSeconds(node, 4, now);
+    const centerRange = mergeRange(boardChildrenRange(node, today), logsRange(node.timeIds && node.timeIds[4], today));
+    if (writeCellText(node, 4, centerRange, centerSec)) changed = true;
     return changed;
   }
 
