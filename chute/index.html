@@ -1114,40 +1114,47 @@
     return sec;
   }
 
-  function ringSumSeconds(node, now){
+  function ringTreeSeconds(node, now){
+    if (!node) return 0;
     let sec = 0;
     RING_ORDER.forEach((idx) => {
       const id = node.timeIds && node.timeIds[idx];
       sec += todaySeconds(id, now);
+      const child = node.children && node.children[idx];
+      if (child) sec += ringTreeSeconds(child, now);
     });
     return sec;
   }
 
-  function ringIsLive(node){
+  function subtreeLive(node){
+    if (!node) return false;
     return RING_ORDER.some((idx) => {
       const id = node.timeIds && node.timeIds[idx];
-      return isTimeRunning(id);
+      if (isTimeRunning(id)) return true;
+      const child = node.children && node.children[idx];
+      return !!(child && subtreeLive(child));
     });
   }
 
-  function centerButtonLabel(node, now){
-    const sum = ringSumSeconds(node, now);
-    const centerId = cellTimeId(node, 4);
-    const centerRun = runningList().find((run) => centerId && run.timeId === centerId);
-    if (ringIsLive(node)) return formatDur(sum);
-    if (centerRun) return formatDur(Math.floor((now - centerRun.startMs) / 1000));
-    if (sum > 0) return formatMinutes(sum);
-    return '▶';
+  function cellTotalSeconds(node, c, now){
+    const own = todaySeconds(cellTimeId(node, c), now);
+    if (c === 4) return own + ringTreeSeconds(node, now);
+    const child = node.children && node.children[c];
+    return own + (child ? ringTreeSeconds(child, now) : 0);
+  }
+
+  function cellTotalLive(node, c){
+    if (isTimeRunning(cellTimeId(node, c))) return true;
+    if (c === 4) return subtreeLive(node);
+    const child = node.children && node.children[c];
+    return !!(child && subtreeLive(child));
   }
 
   function timeButtonLabel(node, c){
     const now = Date.now();
-    if (c === 4) return centerButtonLabel(node, now);
-    const timeId = cellTimeId(node, c);
-    const run = runningList().find((item) => timeId && item.timeId === timeId);
-    if (run) return formatDur(Math.floor((now - run.startMs) / 1000));
-    const sec = todaySeconds(timeId, now);
-    if (sec > 0) return formatMinutes(sec);
+    const total = cellTotalSeconds(node, c, now);
+    if (cellTotalLive(node, c)) return formatDur(total);
+    if (total > 0) return formatMinutes(total);
     return '▶';
   }
 
@@ -1307,17 +1314,10 @@
     }
     document.querySelectorAll('.time-btn').forEach((btn) => {
       const c = Number(btn.dataset.c);
-      const id = btn.dataset.timeId || '';
-      if (c === 4){
-        const label = centerButtonLabel(node, now);
-        btn.textContent = label;
-        btn.classList.toggle('is-play', label === '▶');
-        btn.classList.toggle('is-running', isTimeRunning(cellTimeId(node, 4)));
-        return;
-      }
-      const run = runningList().find((item) => id && item.timeId === id);
-      btn.classList.toggle('is-running', !!run);
-      if (run) btn.textContent = formatDur(Math.floor((now - run.startMs) / 1000));
+      const label = timeButtonLabel(node, c);
+      btn.textContent = label;
+      btn.classList.toggle('is-play', label === '▶');
+      btn.classList.toggle('is-running', isTimeRunning(cellTimeId(node, c)));
     });
   }
 
