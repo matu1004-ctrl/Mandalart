@@ -164,6 +164,7 @@
     padding:clamp(8px, 2vw, 14px); min-height:0; overflow:hidden;
   }
   .board{
+    width:min(100%, calc(100svh - 240px));
     aspect-ratio:1/1;
     display:grid;
     grid-template-columns:repeat(3,1fr);
@@ -1836,10 +1837,15 @@
       void boardEl.offsetWidth;
       boardEl.style.transform = '';
     };
+    const nudge = () => {
+      if (!boardEl) return;
+      boardEl.style.opacity = '0.999';
+      requestAnimationFrame(() => { boardEl.style.opacity = ''; });
+    };
     paint();
-    requestAnimationFrame(() => requestAnimationFrame(paint));
-    setTimeout(paint, 60);
-    setTimeout(paint, 320);
+    requestAnimationFrame(() => { paint(); nudge(); });
+    setTimeout(() => { paint(); nudge(); }, 60);
+    setTimeout(() => { paint(); nudge(); }, 320);
   }
   function leaveSolo(){
     soloEditor = null;
@@ -2586,7 +2592,9 @@
   setInterval(paintTimeNow, 1000);
   updateFabTargetLabel();
   selectCell(4);
-  requestAnimationFrame(() => focusCellEditor(4));
+  if (window.matchMedia('(hover: hover) and (pointer: fine)').matches){
+    requestAnimationFrame(() => focusCellEditor(4));
+  }
   function sizeBoard(){
     const stage = document.querySelector('.stage');
     if (!stage) return;
@@ -2603,7 +2611,11 @@
     }
     boardEl.style.aspectRatio = '';
     const size = Math.max(0, Math.min(availW, availH));
-    if (size < 8) return;
+    if (size < 8){
+      boardEl.style.width = '';
+      boardEl.style.height = '';
+      return;
+    }
     boardEl.style.width = size + 'px';
     boardEl.style.height = size + 'px';
   }
@@ -2618,6 +2630,8 @@
   // so re-measure a couple of times shortly after load to make sure the square is accurate
   requestAnimationFrame(() => requestAnimationFrame(sizeBoard));
   setTimeout(sizeBoard, 300);
+  settleGrid();
+  window.addEventListener('pageshow', settleGrid);
 })();
 </script>
 </body>
