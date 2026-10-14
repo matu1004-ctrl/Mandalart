@@ -266,6 +266,16 @@
   .cell.editing{ touch-action:auto; }
   .cell.editing .cell-editor{ pointer-events:auto; }
   .cell.center .cell-editor{ font-weight:700; }
+  .ring-count{
+    position:absolute;
+    top:4px;
+    right:6px;
+    z-index:3;
+    font-size:calc(var(--cell-font-size) * 0.7);
+    line-height:1;
+    color:var(--ink-soft);
+    pointer-events:none;
+  }
   .cell-editor{ padding-bottom:calc(var(--cell-font-size) * 2.4 + 8px); }
   body.solo-edit .bottom-dock{ display:none; }
   body.solo-edit .board{
@@ -1396,6 +1406,11 @@
     return out;
   }
 
+  function filledRingCount(child){
+    if (!child) return 0;
+    return [0, 1, 2, 3, 5, 6, 7, 8].filter((i) => cellDisplay(child.cells[i])).length;
+  }
+
   function render(){
     const leftSolo = document.body.classList.contains('solo-edit');
     if (leftSolo){
@@ -1496,6 +1511,13 @@
       });
       wrap.appendChild(ta);
       cellEl.appendChild(wrap);
+      const filled = c === 4 ? 0 : filledRingCount(node.children[c]);
+      if (filled > 0){
+        const badge = document.createElement('span');
+        badge.className = 'ring-count';
+        badge.textContent = String(filled);
+        cellEl.appendChild(badge);
+      }
       const timeBtn = document.createElement('button');
       timeBtn.type = 'button';
       timeBtn.className = 'time-btn';

@@ -266,6 +266,16 @@
   .cell.editing{ touch-action:auto; }
   .cell.editing .cell-editor{ pointer-events:auto; }
   .cell.center .cell-editor{ font-weight:700; }
+  .ring-count{
+    position:absolute;
+    top:4px;
+    right:6px;
+    z-index:3;
+    font-size:calc(var(--cell-font-size) * 0.7);
+    line-height:1;
+    color:var(--ink-soft);
+    pointer-events:none;
+  }
   body.solo-edit .bottom-dock{ display:none; }
   body.solo-edit .board{
     display:block;
@@ -931,6 +941,11 @@
     document.addEventListener('pointercancel', onDragCancel);
   }
 
+  function filledRingCount(child){
+    if (!child) return 0;
+    return [0, 1, 2, 3, 5, 6, 7, 8].filter((i) => cellDisplay(child.cells[i])).length;
+  }
+
   function render(){
     const leftSolo = document.body.classList.contains('solo-edit');
     if (leftSolo){
@@ -1031,6 +1046,13 @@
       });
       wrap.appendChild(ta);
       cellEl.appendChild(wrap);
+      const filled = c === 4 ? 0 : filledRingCount(node.children[c]);
+      if (filled > 0){
+        const badge = document.createElement('span');
+        badge.className = 'ring-count';
+        badge.textContent = String(filled);
+        cellEl.appendChild(badge);
+      }
       boardEl.appendChild(cellEl);
       attachGestures(cellEl, ta, c);
     }
