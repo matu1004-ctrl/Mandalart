@@ -123,30 +123,79 @@
   .fab-menu{
     display:none;
     background:#fff;
-    border:1px solid #e2e2e2;
-    border-radius:12px;
-    box-shadow:0 10px 28px rgba(0,0,0,.2);
-    overflow:hidden;
+    border:1px solid #e6e6e2;
+    border-radius:18px;
+    box-shadow:0 14px 36px rgba(0,0,0,.18);
     width:100%;
-    max-height:min(60vh, 520px);
+    max-height:min(70vh, 600px);
     overflow-y:auto;
+    padding:14px 14px 12px;
     -webkit-text-size-adjust:100%;
     text-size-adjust:100%;
   }
   .fab-menu.open{ display:block; }
+  .menu-head{
+    font-size:13px;
+    color:var(--ink-soft);
+    padding:0 4px 10px;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+  }
+  .menu-section + .menu-section{ margin-top:14px; }
+  .menu-label{
+    font-size:12px;
+    font-weight:700;
+    letter-spacing:.08em;
+    color:var(--ink-soft);
+    padding:0 4px 6px;
+  }
+  .menu-grid{
+    display:grid;
+    grid-template-columns:repeat(2, 1fr);
+    gap:8px;
+  }
+  .menu-grid.three{ grid-template-columns:repeat(3, 1fr); }
   .fab-menu button{
-    display:block; width:100%; text-align:left;
-    padding:16px 18px; border:0; background:none;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:center;
+    gap:3px;
+    min-height:58px;
+    padding:10px 8px;
+    border:1px solid #e8e8e4;
+    border-radius:12px;
+    background:#f6f6f3;
     font-family:"Zen Kaku Gothic New", -apple-system, BlinkMacSystemFont, sans-serif;
-    font-size:36px !important;
+    font-size:16px;
+    font-weight:500;
     line-height:1.25;
     color:var(--ink);
+    text-align:center;
     cursor:pointer;
     -webkit-text-size-adjust:100%;
     text-size-adjust:100%;
   }
-  .fab-menu button:active{ background:#f3f1ea; }
-  .fab-menu button + button{ border-top:1px solid #eee; }
+  .fab-menu button small{
+    max-width:100%;
+    font-size:11px;
+    font-weight:400;
+    color:var(--ink-soft);
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+  }
+  .fab-menu button:active{ background:#ebeae5; }
+  .fab-menu button:disabled{ opacity:.4; cursor:default; }
+  .fab-menu button.danger{
+    width:100%;
+    min-height:48px;
+    margin-top:16px;
+    background:#fff;
+    border-color:#efd3cf;
+    color:var(--accent);
+  }
   .fab-btn{
     flex-shrink:0;
     width:48px; height:48px; border:0; border-radius:50%;
@@ -474,14 +523,37 @@
 <div class="bottom-dock" id="bottomDock">
   <div class="fab-wrap" id="fabWrap">
     <div class="fab-menu" id="menu">
-      <button type="button" id="exportBtn">書き出す（テキスト）</button>
-      <button type="button" id="exportMdBtn">書き出す（Markdown）</button>
-      <button type="button" id="exportWfBtn">書き出す（Workflowy）</button>
-      <button type="button" id="importOutlineBtn">アウトラインを取り込む</button>
-      <button type="button" id="fillTemplateBtn">テンプレートを入れる</button>
-      <button type="button" id="fillSceneTemplateBtn">シーン構成</button>
-      <button type="button" id="styleBtn">文字スタイル</button>
-      <button type="button" id="resetBtn">クリア</button>
+      <div class="menu-head" id="menuHead"></div>
+      <div class="menu-section">
+        <div class="menu-label">編集</div>
+        <div class="menu-grid">
+          <button type="button" id="cutBtn">切り取り<small>選んだセルと下の階層</small></button>
+          <button type="button" id="pasteBtn">貼り付け<small id="pasteNote">なし</small></button>
+        </div>
+      </div>
+      <div class="menu-section">
+        <div class="menu-label">書き出し</div>
+        <div class="menu-grid three">
+          <button type="button" id="exportBtn">テキスト</button>
+          <button type="button" id="exportMdBtn">Markdown</button>
+          <button type="button" id="exportWfBtn">Workflowy</button>
+        </div>
+      </div>
+      <div class="menu-section">
+        <div class="menu-label">入れる</div>
+        <div class="menu-grid three">
+          <button type="button" id="importOutlineBtn">アウトライン</button>
+          <button type="button" id="fillTemplateBtn">テンプレート</button>
+          <button type="button" id="fillSceneTemplateBtn">シーン構成</button>
+        </div>
+      </div>
+      <div class="menu-section">
+        <div class="menu-label">その他</div>
+        <div class="menu-grid">
+        <button type="button" id="styleBtn">文字スタイル</button>
+        </div>
+      </div>
+      <button type="button" class="danger" id="resetBtn">すべてクリア</button>
     </div>
     <div class="fab-bar" id="fabBar">
       <div class="fab-target" id="fabTarget"></div>
@@ -1308,6 +1380,7 @@
     if (e){ e.preventDefault(); e.stopPropagation(); }
     captureFocusedCell();
     updateFabTargetLabel();
+    updateClipUI();
     menu.classList.add('open');
   }
   function closeMenu(){ menu.classList.remove('open'); }
@@ -1974,6 +2047,108 @@
   });
   document.getElementById('fillSceneTemplateBtn').addEventListener('pointerup', () => {
     fillCurrentBoardTemplate(BOARD_TEMPLATES.scene);
+  });
+
+  // ---- cut / paste a cell together with every level below it ----
+  const CLIP_KEY = STORAGE_KEY + ':clip';
+  function loadClip(){
+    try{
+      const raw = localStorage.getItem(CLIP_KEY);
+      return raw ? JSON.parse(raw) : null;
+    }catch(e){ return null; }
+  }
+  function saveClip(clip){
+    try{
+      if (clip) localStorage.setItem(CLIP_KEY, JSON.stringify(clip));
+      else localStorage.removeItem(CLIP_KEY);
+    }catch(e){}
+  }
+  // The center of a nested board is the parent's cell, so work on that slot.
+  function selectedSlot(){
+    captureFocusedCell();
+    let c = lastFocusedCellC;
+    if (typeof c !== 'number' || c < 0 || c > 8) c = 4;
+    if (c !== 4) return { node: currentNode(), idx: c, isBoard: false };
+    if (atRoot()) return null;
+    return { node: navPath[navPath.length - 2].node, idx: navPath[navPath.length - 1].idx, isBoard: true };
+  }
+  function slotHasContent(slot){
+    return !!(cellDisplay(slot.node.cells[slot.idx]) || slot.node.children[slot.idx]);
+  }
+  function clipLabel(clip){
+    if (!clip) return 'なし';
+    return plainText(clip.text || '').trim().split('\n')[0] || '（無題）';
+  }
+  function updateClipUI(){
+    const clip = loadClip();
+    const head = document.getElementById('menuHead');
+    if (head){
+      const c = typeof lastFocusedCellC === 'number' ? lastFocusedCellC : 4;
+      head.textContent = '選択中: ' + cellRoleLabel(c);
+    }
+    const note = document.getElementById('pasteNote');
+    if (note) note.textContent = clipLabel(clip);
+    const pasteBtn = document.getElementById('pasteBtn');
+    if (pasteBtn) pasteBtn.disabled = !clip;
+  }
+  function afterTreeChange(){
+    if (typeof refreshTimePrefixes === 'function') refreshTimePrefixes(root);
+    render();
+    selectCell(lastFocusedCellC);
+    scheduleSave();
+  }
+  document.getElementById('cutBtn').addEventListener('pointerup', () => {
+    const slot = selectedSlot();
+    closeMenu();
+    if (!slot){
+      alert('一番上の中心のセルは切り取れません。周りのセルを選んでください。');
+      return;
+    }
+    if (!slotHasContent(slot)){
+      alert('選んだセルは空です。');
+      return;
+    }
+    if (loadClip() && !confirm('前に切り取った内容がまだ貼り付けられていません。置き換えますか？')) return;
+    const node = slot.node;
+    saveClip({
+      text: node.cells[slot.idx] || '',
+      child: node.children[slot.idx] || null,
+      timeId: (node.timeIds && node.timeIds[slot.idx]) || null
+    });
+    node.cells[slot.idx] = '';
+    node.children[slot.idx] = null;
+    if (node.timeIds) node.timeIds[slot.idx] = null;
+    if (slot.isBoard){
+      navPath.pop();
+      lastFocusedCellC = slot.idx;
+    }
+    afterTreeChange();
+  });
+  document.getElementById('pasteBtn').addEventListener('pointerup', () => {
+    const clip = loadClip();
+    const slot = selectedSlot();
+    closeMenu();
+    if (!clip) return;
+    if (!slot){
+      alert('一番上の中心のセルには貼り付けできません。周りのセルを選んでください。');
+      return;
+    }
+    if (slotHasContent(slot) && !confirm('選んだセルとその下の階層を、切り取った内容で置き換えます。よろしいですか？')) return;
+    const node = slot.node;
+    const child = clip.child ? normalizeNode(clip.child) : null;
+    if (child) child.cells[4] = clip.text || '';
+    node.cells[slot.idx] = clip.text || '';
+    node.children[slot.idx] = child;
+    if (node.timeIds) node.timeIds[slot.idx] = clip.timeId || null;
+    if (slot.isBoard){
+      if (!node.children[slot.idx]){
+        node.children[slot.idx] = makeNode();
+        node.children[slot.idx].cells[4] = node.cells[slot.idx];
+      }
+      navPath[navPath.length - 1].node = node.children[slot.idx];
+    }
+    saveClip(null);
+    afterTreeChange();
   });
 
   document.getElementById('resetBtn').addEventListener('pointerup', () => {
