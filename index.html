@@ -2091,6 +2091,13 @@
     const pasteBtn = document.getElementById('pasteBtn');
     if (pasteBtn) pasteBtn.disabled = !clip;
   }
+  // A second paste is a copy, so it must not share timers or records with the first.
+  function dropTimeLinks(node){
+    if (!node) return;
+    if (node.timeIds) node.timeIds = Array(9).fill(null);
+    if ('nodeId' in node) node.nodeId = null;
+    (node.children || []).forEach(dropTimeLinks);
+  }
   function afterTreeChange(){
     if (typeof refreshTimePrefixes === 'function') refreshTimePrefixes(root);
     render();
@@ -2108,7 +2115,8 @@
       alert('選んだセルは空です。');
       return;
     }
-    if (loadClip() && !confirm('前に切り取った内容がまだ貼り付けられていません。置き換えますか？')) return;
+    const prevClip = loadClip();
+    if (prevClip && !prevClip.pasted && !confirm('前に切り取った内容がまだ貼り付けられていません。置き換えますか？')) return;
     const node = slot.node;
     saveClip({
       text: node.cells[slot.idx] || '',
@@ -2135,11 +2143,12 @@
     }
     if (slotHasContent(slot) && !confirm('選んだセルとその下の階層を、切り取った内容で置き換えます。よろしいですか？')) return;
     const node = slot.node;
-    const child = clip.child ? normalizeNode(clip.child) : null;
+    const child = clip.child ? normalizeNode(JSON.parse(JSON.stringify(clip.child))) : null;
+    if (child && clip.pasted) dropTimeLinks(child);
     if (child) child.cells[4] = clip.text || '';
     node.cells[slot.idx] = clip.text || '';
     node.children[slot.idx] = child;
-    if (node.timeIds) node.timeIds[slot.idx] = clip.timeId || null;
+    if (node.timeIds) node.timeIds[slot.idx] = clip.pasted ? null : (clip.timeId || null);
     if (slot.isBoard){
       if (!node.children[slot.idx]){
         node.children[slot.idx] = makeNode();
@@ -2147,7 +2156,7 @@
       }
       navPath[navPath.length - 1].node = node.children[slot.idx];
     }
-    saveClip(null);
+    saveClip(Object.assign({}, clip, { pasted: true }));
     afterTreeChange();
   });
 
