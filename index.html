@@ -1160,6 +1160,29 @@
   const LONG_PRESS_MS = 320;
   const DOUBLE_TAP_MS = 350;
   let lastTap = { c: null, t: 0, node: null };
+  // on phones the solo editor covers the grid, so the second tap of a double tap can land anywhere
+  let soloTapArm = null;
+  let swallowTapUntil = 0;
+  document.addEventListener('pointerdown', (e) => {
+    const arm = soloTapArm;
+    if (!arm) return;
+    soloTapArm = null;
+    if (Date.now() > arm.until || arm.node !== currentNode() || !document.body.classList.contains('solo-edit')) return;
+    e.preventDefault();
+    e.stopPropagation();
+    swallowTapUntil = Date.now() + 700;
+    leaveSolo();
+    if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+    expand(arm.c);
+  }, true);
+  ['pointerup', 'click'].forEach((type) => {
+    document.addEventListener(type, (e) => {
+      if (Date.now() >= swallowTapUntil) return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (type === 'click') swallowTapUntil = 0;
+    }, true);
+  });
   const MOVE_CANCEL_PX = 28;
 
   let backPressTimer = null;
@@ -1199,10 +1222,12 @@
     let lpTimer = null;
     let lpReady = false;
     let startX = 0, startY = 0;
+    let wasSelected = false;
 
     function isEditing(){ return document.activeElement === ta; }
 
     function beginPress(e){
+      wasSelected = cellEl.classList.contains('is-selected');
       selectCell(c); // mark paste/import target even if focus fails
       startX = e.clientX; startY = e.clientY;
       lpReady = false;
@@ -1257,6 +1282,10 @@
       if (!isEditing() && bigButtonHeld){
         if (!longTextTarget) openLongText(c);
         return;
+      }
+      if (isPhoneLayout() && !isEditing()){
+        if (!wasSelected) return;
+        if (canExpand(c)) soloTapArm = { c, node: currentNode(), until: now + DOUBLE_TAP_MS };
       }
       phoneEditArmed = true;
       if (isPhoneLayout()) enterSolo(cellEl);
