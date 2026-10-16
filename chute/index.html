@@ -1645,8 +1645,10 @@
     scheduleSave();
   }
 
-  // ---- gestures: tap-to-edit, long-press to expand/back, long-press+drag to swap ----
+  // ---- gestures: tap-to-edit, double-tap to expand/back, long-press+drag to swap ----
   const LONG_PRESS_MS = 320;
+  const DOUBLE_TAP_MS = 350;
+  let lastTap = { c: null, t: 0, node: null };
   const MOVE_CANCEL_PX = 28;
 
   let backPressTimer = null;
@@ -1721,18 +1723,24 @@
       }
     }
 
-    function onUp(){
+    function onUp(e){
+      if (e){
+        if (e.mandalartTapHandled) return;
+        e.mandalartTapHandled = true;
+      }
       if (dragState) return;
       const wasReady = lpReady;
       cancelPress();
 
-      if (wasReady){
-        if (canExpand(c)){
-          leaveSolo();
-          expand(c);
-          return;
-        }
-        // center cell at root (etc.): long-press isn't navigation — fall through to edit
+      const now = Date.now();
+      const node = currentNode();
+      const isDouble = !wasReady && lastTap.c === c && lastTap.node === node && (now - lastTap.t) < DOUBLE_TAP_MS;
+      lastTap = isDouble ? { c: null, t: 0, node: null } : { c, t: now, node };
+      if (isDouble && canExpand(c)){
+        leaveSolo();
+        if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+        expand(c);
+        return;
       }
 
       if (!isEditing() && bigButtonHeld){
