@@ -1264,6 +1264,10 @@
         if (e.mandalartTapHandled) return;
         e.mandalartTapHandled = true;
       }
+      if (!cellEl.isConnected || Date.now() < swallowTapUntil){
+        cancelPress();
+        return;
+      }
       if (dragState) return;
       const wasReady = lpReady;
       cancelPress();
