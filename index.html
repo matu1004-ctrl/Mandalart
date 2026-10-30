@@ -2384,8 +2384,12 @@
   function hourSlot(hour){
     for (let i = 0; i < 9; i++){
       if (i === 4) continue;
-      const m = cellDisplay(root.cells[i]).match(/^(\d{1,2})\s*[-–〜~]\s*(\d{1,2})$/);
-      if (m && Number(m[1]) <= hour && hour <= Number(m[2])) return { node: root, idx: i, path: [] };
+      const label = cellDisplay(root.cells[i]).normalize('NFKC').replace(/\s+/g, '');
+      const m = label.match(/^(\d{1,2})時?[-‐‑‒–—―ー−~〜～]+(\d{1,2})時?$/);
+      if (!m) continue;
+      const from = Number(m[1]), to = Number(m[2]);
+      const inRange = from <= to ? (from <= hour && hour <= to) : (hour >= from || hour <= to);
+      if (inRange) return { node: root, idx: i, path: [] };
     }
     const memoNode = memoChild(root, DAY_MEMO_CELL);
     const label = String(hour);
