@@ -2831,14 +2831,119 @@
     moveCellFocus(e.shiftKey ? -1 : 1);
   });
 
+  // ---- memo from a URL (?memo=…), e.g. from an iOS Shortcut ----
+  const DAY_LAYOUT = ['12-14', '15-17', '18-20', '9-11', null, '21-23', '6-8', 'タスク', 'メモ'];
+  const DAY_MEMO_CELL = 8;
+  const MEMO_ORDER = [7, 6, 3, 0, 1, 2, 5];
+  const MEMO_MORE_CELL = 8;
+  const MEMO_MORE_LABEL = '続';
+  const WEEKDAY_JA = { Sun: '日', Mon: '月', Tue: '火', Wed: '水', Thu: '木', Fri: '金', Sat: '土' };
+
+  function tokyoNow(){
+    const parts = {};
+    new Intl.DateTimeFormat('en-US', {
+      timeZone: 'Asia/Tokyo', month: 'numeric', day: 'numeric', weekday: 'short',
+      hour: 'numeric', minute: '2-digit', hourCycle: 'h23',
+    }).formatToParts(new Date()).forEach((p) => { parts[p.type] = p.value; });
+    return {
+      dateLabel: `${Number(parts.month)}月${Number(parts.day)}日(${WEEKDAY_JA[parts.weekday] || ''})`,
+      hour: Number(parts.hour) % 24,
+      time: `${Number(parts.hour) % 24}:${parts.minute}`,
+    };
+  }
+  function textToCellHtml(text){
+    return String(text)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/\r\n?/g, '\n').replace(/\n/g, '<br>');
+  }
+  function memoChild(node, i){
+    if (!node.children[i]) node.children[i] = makeNode();
+    node.children[i].cells[4] = node.cells[i];
+    return node.children[i];
+  }
+  function ensureDayLayout(dateLabel){
+    DAY_LAYOUT.forEach((label, i) => {
+      if (label && !cellDisplay(root.cells[i])) root.cells[i] = label;
+    });
+    const center = cellDisplay(root.cells[4]);
+    if (!center || center === '日にち' || /^\d{1,2}月\d{1,2}日/.test(center)) root.cells[4] = dateLabel;
+    for (let i = 0; i < 9; i++){
+      if (i !== 4 && root.children[i]) root.children[i].cells[4] = root.cells[i];
+    }
+  }
+  // fills MEMO_ORDER, then turns the bottom-right cell into "続" and continues one level down
+  function nextMemoSlot(node, path){
+    for (;;){
+      for (const i of MEMO_ORDER){
+        if (!cellDisplay(node.cells[i])) return { node, idx: i, path };
+      }
+      if (!cellDisplay(node.cells[MEMO_MORE_CELL])) node.cells[MEMO_MORE_CELL] = MEMO_MORE_LABEL;
+      path = path.concat(MEMO_MORE_CELL);
+      node = memoChild(node, MEMO_MORE_CELL);
+    }
+  }
+  function findLabelInChain(node, path, label){
+    for (;;){
+      for (const i of MEMO_ORDER){
+        if (cellDisplay(node.cells[i]) === label) return { node, idx: i, path };
+      }
+      if (cellDisplay(node.cells[MEMO_MORE_CELL]) !== MEMO_MORE_LABEL || !node.children[MEMO_MORE_CELL]) return null;
+      path = path.concat(MEMO_MORE_CELL);
+      node = node.children[MEMO_MORE_CELL];
+    }
+  }
+  function hourSlot(hour){
+    for (let i = 0; i < 9; i++){
+      if (i === 4) continue;
+      const m = cellDisplay(root.cells[i]).match(/^(\d{1,2})\s*[-–〜~]\s*(\d{1,2})$/);
+      if (m && Number(m[1]) <= hour && hour <= Number(m[2])) return { node: root, idx: i, path: [] };
+    }
+    const memoNode = memoChild(root, DAY_MEMO_CELL);
+    const label = String(hour);
+    const found = findLabelInChain(memoNode, [DAY_MEMO_CELL], label);
+    if (found) return found;
+    const slot = nextMemoSlot(memoNode, [DAY_MEMO_CELL]);
+    slot.node.cells[slot.idx] = label;
+    return slot;
+  }
+  function applyMemoFromUrl(){
+    const params = new URLSearchParams(location.search);
+    const memo = (params.get('memo') || params.get('add') || '').trim();
+    if (!params.has('memo') && !params.has('add')) return null;
+    params.delete('memo');
+    params.delete('add');
+    const rest = params.toString();
+    history.replaceState(null, '', location.pathname + (rest ? '?' + rest : '') + location.hash);
+    if (!memo) return null;
+
+    const now = tokyoNow();
+    ensureDayLayout(now.dateLabel);
+    const hour = hourSlot(now.hour);
+    const hourPath = hour.path.concat(hour.idx);
+    const slot = nextMemoSlot(memoChild(hour.node, hour.idx), hourPath);
+    slot.node.cells[slot.idx] = textToCellHtml(`${memo} ${now.time}`);
+
+    navPath = [{ node: root, idx: null }];
+    let node = root;
+    for (const idx of slot.path){
+      node = node.children[idx];
+      navPath.push({ node, idx });
+    }
+    lastFocusedCellC = slot.idx;
+    render();
+    saveData();
+    return slot.idx;
+  }
+
   loadStyleSettings();
   loadTime();
   loadData();
+  const memoCell = applyMemoFromUrl();
   if (refreshTimePrefixes(root)) scheduleSave();
   paintTimeNow();
   setInterval(paintTimeNow, 1000);
   updateFabTargetLabel();
-  selectCell(4);
+  selectCell(memoCell === null ? 4 : memoCell);
   if (window.matchMedia('(hover: hover) and (pointer: fine)').matches){
     requestAnimationFrame(() => focusCellEditor(4));
   }
