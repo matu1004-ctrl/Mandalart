@@ -1890,7 +1890,10 @@
   const EMPTY_CELL_MARK = '・';
 
   function exportPlain(html){
-    return String(cellDisplay(html) || '').trim();
+    const withBreaks = String(html || '')
+      .replace(/<br\s*\/?>/gi, '\n')
+      .replace(/<\/(div|p)>/gi, '\n');
+    return plainText(withBreaks).trim();
   }
   function cellLines(text){
     return String(text || '').split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
