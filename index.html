@@ -2399,7 +2399,19 @@
     slot.node.cells[slot.idx] = label;
     return slot;
   }
+  function showMemoNotice(message){
+    const el = document.createElement('div');
+    el.textContent = message;
+    el.style.cssText = 'position:fixed;left:50%;top:calc(env(safe-area-inset-top) + 12px);transform:translateX(-50%);'
+      + 'max-width:90vw;padding:10px 16px;border-radius:12px;background:rgba(40,40,40,.92);color:#fff;'
+      + 'font-size:15px;line-height:1.4;z-index:9999;white-space:pre-wrap;word-break:break-all;pointer-events:none;'
+      + 'transition:opacity .4s';
+    document.body.appendChild(el);
+    setTimeout(() => { el.style.opacity = '0'; }, 4000);
+    setTimeout(() => el.remove(), 4500);
+  }
   function applyMemoFromUrl(){
+    const rawSearch = location.search;
     const params = new URLSearchParams(location.search);
     const memo = (params.get('memo') || params.get('add') || '').trim();
     if (!params.has('memo') && !params.has('add')) return null;
@@ -2407,7 +2419,10 @@
     params.delete('add');
     const rest = params.toString();
     history.replaceState(null, '', location.pathname + (rest ? '?' + rest : '') + location.hash);
-    if (!memo) return null;
+    if (!memo){
+      showMemoNotice('メモが空でした\n受け取ったURL: ' + decodeURIComponentSafe(rawSearch));
+      return null;
+    }
 
     const now = tokyoNow();
     ensureDayLayout(now.dateLabel);
@@ -2425,7 +2440,11 @@
     lastFocusedCellC = slot.idx;
     render();
     saveData();
+    showMemoNotice('記入しました: ' + memo);
     return slot.idx;
+  }
+  function decodeURIComponentSafe(text){
+    try{ return decodeURIComponent(text); }catch(e){ return text; }
   }
 
   loadStyleSettings();
