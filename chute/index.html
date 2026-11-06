@@ -2959,7 +2959,10 @@
   loadTime();
   loadData();
   const memoCell = applyMemoFromUrl();
-  if (refreshTimePrefixes(root)) scheduleSave();
+  if (refreshTimePrefixes(root)){
+    render();
+    scheduleSave();
+  }
   paintTimeNow();
   setInterval(paintTimeNow, 1000);
   updateFabTargetLabel();
