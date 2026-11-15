@@ -1202,19 +1202,9 @@
     return node.nodeId;
   }
 
+  // same counting rule as the time written into the cell text
   function todaySeconds(timeId, now){
-    if (!timeId) return 0;
-    const today = todayKey(now);
-    let sec = 0;
-    timeState.logs.forEach((log) => {
-      if (log.timeId === timeId && todayKey(log.startMs) === today) sec += Number(log.durationSec) || 0;
-    });
-    runningList().forEach((run) => {
-      if (run.timeId === timeId && todayKey(run.startMs) === today){
-        sec += Math.max(0, Math.floor((now - run.startMs) / 1000));
-      }
-    });
-    return sec;
+    return loggedSeconds(timeId, now);
   }
 
   function ringTreeSeconds(node, now){
@@ -1426,6 +1416,27 @@
     return ids;
   }
 
+  function treeTimeIds(node, out){
+    if (!node) return out;
+    RING_ORDER.forEach((idx) => {
+      const id = node.timeIds && node.timeIds[idx];
+      if (id) out.add(id);
+      if (node.children && node.children[idx]) treeTimeIds(node.children[idx], out);
+    });
+    return out;
+  }
+  // a cell's total includes everything below it, so timers above or below must not overlap
+  function nestedTimeIds(node, c){
+    const ids = new Set(boardTimeIds(node));
+    for (let k = 1; k < navPath.length; k++){
+      const parent = navPath[k - 1].node;
+      const id = parent.timeIds && parent.timeIds[navPath[k].idx];
+      if (id) ids.add(id);
+    }
+    treeTimeIds(c === 4 ? node : node.children[c], ids);
+    return ids;
+  }
+
   function toggleCellTimer(c){
     const node = currentNode();
     const nodeId = ensureNodeId(node);
@@ -1433,7 +1444,7 @@
     if (existing && isTimeRunning(existing)){
       stopEntries(runningList().filter((run) => run.timeId === existing));
     } else {
-      const ids = new Set(boardTimeIds(node));
+      const ids = nestedTimeIds(node, c);
       stopEntries(runningList().filter((run) => run.nodeId === nodeId || ids.has(run.timeId)));
       const id = ensureTimeId(node, c);
       const title = stripTimeStamp(cellText(node.cells[c])).trim() || '（無題）';
