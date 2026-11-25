@@ -2906,6 +2906,10 @@
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
       .replace(/\r\n?/g, '\n').replace(/\n/g, '<br>');
   }
+  // timed cells carry a time stamp after their name
+  function memoLabel(value){
+    return stripTimeStamp(cellDisplay(value)).trim();
+  }
   function memoChild(node, i){
     if (!node.children[i]) node.children[i] = makeNode();
     node.children[i].cells[4] = node.cells[i];
@@ -2935,9 +2939,9 @@
   function findLabelInChain(node, path, label){
     for (;;){
       for (const i of MEMO_ORDER){
-        if (cellDisplay(node.cells[i]) === label) return { node, idx: i, path };
+        if (memoLabel(node.cells[i]) === label) return { node, idx: i, path };
       }
-      if (cellDisplay(node.cells[MEMO_MORE_CELL]) !== MEMO_MORE_LABEL || !node.children[MEMO_MORE_CELL]) return null;
+      if (memoLabel(node.cells[MEMO_MORE_CELL]) !== MEMO_MORE_LABEL || !node.children[MEMO_MORE_CELL]) return null;
       path = path.concat(MEMO_MORE_CELL);
       node = node.children[MEMO_MORE_CELL];
     }
@@ -2945,7 +2949,7 @@
   function hourSlot(hour){
     for (let i = 0; i < 9; i++){
       if (i === 4) continue;
-      const label = cellDisplay(root.cells[i]).normalize('NFKC').replace(/\s+/g, '');
+      const label = memoLabel(root.cells[i]).normalize('NFKC').replace(/\s+/g, '');
       const m = label.match(/^(\d{1,2})時?[-‐‑‒–—―ー−~〜～]+(\d{1,2})時?$/);
       if (!m) continue;
       const from = Number(m[1]), to = Number(m[2]);

@@ -2907,6 +2907,10 @@
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
       .replace(/\r\n?/g, '\n').replace(/\n/g, '<br>');
   }
+  // timed cells carry a time stamp after their name
+  function memoLabel(value){
+    return stripTimeStamp(cellDisplay(value)).trim();
+  }
   function memoChild(node, i){
     if (!node.children[i]) node.children[i] = makeNode();
     node.children[i].cells[4] = node.cells[i];
@@ -2936,9 +2940,9 @@
   function findLabelInChain(node, path, label){
     for (;;){
       for (const i of MEMO_ORDER){
-        if (cellDisplay(node.cells[i]) === label) return { node, idx: i, path };
+        if (memoLabel(node.cells[i]) === label) return { node, idx: i, path };
       }
-      if (cellDisplay(node.cells[MEMO_MORE_CELL]) !== MEMO_MORE_LABEL || !node.children[MEMO_MORE_CELL]) return null;
+      if (memoLabel(node.cells[MEMO_MORE_CELL]) !== MEMO_MORE_LABEL || !node.children[MEMO_MORE_CELL]) return null;
       path = path.concat(MEMO_MORE_CELL);
       node = node.children[MEMO_MORE_CELL];
     }
@@ -2946,8 +2950,12 @@
   function hourSlot(hour){
     for (let i = 0; i < 9; i++){
       if (i === 4) continue;
-      const m = cellDisplay(root.cells[i]).match(/^(\d{1,2})\s*[-–〜~]\s*(\d{1,2})$/);
-      if (m && Number(m[1]) <= hour && hour <= Number(m[2])) return { node: root, idx: i, path: [] };
+      const label = memoLabel(root.cells[i]).normalize('NFKC').replace(/\s+/g, '');
+      const m = label.match(/^(\d{1,2})時?[-‐‑‒–—―ー−~〜～]+(\d{1,2})時?$/);
+      if (!m) continue;
+      const from = Number(m[1]), to = Number(m[2]);
+      const inRange = from <= to ? (from <= hour && hour <= to) : (hour >= from || hour <= to);
+      if (inRange) return { node: root, idx: i, path: [] };
     }
     const memoNode = memoChild(root, DAY_MEMO_CELL);
     const label = String(hour);
@@ -2957,7 +2965,19 @@
     slot.node.cells[slot.idx] = label;
     return slot;
   }
+  function showMemoNotice(message){
+    const el = document.createElement('div');
+    el.textContent = message;
+    el.style.cssText = 'position:fixed;left:50%;top:calc(env(safe-area-inset-top) + 12px);transform:translateX(-50%);'
+      + 'max-width:90vw;padding:10px 16px;border-radius:12px;background:rgba(40,40,40,.92);color:#fff;'
+      + 'font-size:15px;line-height:1.4;z-index:9999;white-space:pre-wrap;word-break:break-all;pointer-events:none;'
+      + 'transition:opacity .4s';
+    document.body.appendChild(el);
+    setTimeout(() => { el.style.opacity = '0'; }, 4000);
+    setTimeout(() => el.remove(), 4500);
+  }
   function applyMemoFromUrl(){
+    const rawSearch = location.search;
     const params = new URLSearchParams(location.search);
     const memo = (params.get('memo') || params.get('add') || '').trim();
     if (!params.has('memo') && !params.has('add')) return null;
@@ -2965,7 +2985,10 @@
     params.delete('add');
     const rest = params.toString();
     history.replaceState(null, '', location.pathname + (rest ? '?' + rest : '') + location.hash);
-    if (!memo) return null;
+    if (!memo){
+      showMemoNotice('メモが空でした\n受け取ったURL: ' + decodeURIComponentSafe(rawSearch));
+      return null;
+    }
 
     const now = tokyoNow();
     ensureDayLayout(now.dateLabel);
@@ -2983,7 +3006,11 @@
     lastFocusedCellC = slot.idx;
     render();
     saveData();
+    showMemoNotice('記入しました: ' + memo);
     return slot.idx;
+  }
+  function decodeURIComponentSafe(text){
+    try{ return decodeURIComponent(text); }catch(e){ return text; }
   }
 
   loadStyleSettings();
