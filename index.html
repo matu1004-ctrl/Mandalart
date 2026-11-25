@@ -47,8 +47,8 @@
 
   /* top bar */
   .topbar{
-    height:var(--topbar-h);
-    flex:0 0 var(--topbar-h);
+    min-height:var(--topbar-h);
+    flex:0 0 auto;
     display:flex;
     align-items:center;
     padding: env(safe-area-inset-top) 6px 0;
@@ -326,6 +326,9 @@
     font-weight:600;
     pointer-events:none;
   }
+  .cell-editor{ padding-bottom:calc(var(--cell-font-size) * 2.4 + 8px); }
+  body.no-timing .cell-editor{ padding-bottom:6px; }
+  body.no-timing.solo-edit .cell.editing .cell-editor{ padding-bottom:18px; }
   body.solo-edit .bottom-dock{ display:none; }
   body.solo-edit .board{
     display:block;
@@ -358,8 +361,67 @@
   body.solo-edit .cell.editing .cell-editor{
     font-size:max(18px, var(--cell-font-size));
     line-height:1.45;
-    padding:18px 16px;
+    padding:18px 16px calc(var(--cell-font-size) * 2.6 + 16px);
   }
+  .time-btn{
+    position:absolute;
+    right:4px;
+    bottom:4px;
+    z-index:4;
+    max-width:calc(100% - 8px);
+    height:calc(var(--cell-font-size) * 1.6);
+    padding:0 2px;
+    border:0;
+    border-radius:999px;
+    background:transparent;
+    color:var(--accent);
+    font-family:inherit;
+    font-size:var(--cell-font-size);
+    font-weight:500;
+    line-height:1;
+    letter-spacing:0;
+    cursor:pointer;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    white-space:nowrap;
+  }
+  .time-btn.is-play{
+    width:calc(var(--cell-font-size) * 1.6);
+    padding:0 0 0 calc(var(--cell-font-size) * 0.12);
+    border-radius:50%;
+    background:#b3b3b3;
+    color:#fff;
+    font-size:calc(var(--cell-font-size) * 0.75);
+  }
+  .time-btn.is-running{ font-weight:700; }
+  .title-stack{
+    flex:1;
+    min-width:0;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:center;
+    gap:2px;
+  }
+  .title-stack .title{ flex:0 1 auto; width:100%; }
+  .time-now{
+    display:none;
+    max-width:100%;
+    border:0;
+    border-radius:999px;
+    background:var(--accent);
+    color:#fff;
+    font-family:inherit;
+    font-size:var(--cell-font-size);
+    line-height:1.2;
+    padding:calc(var(--cell-font-size) * 0.2) calc(var(--cell-font-size) * 0.5);
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+    cursor:pointer;
+  }
+  .time-now.show{ display:block; }
   .cell-editor b, .cell-editor strong, .lt-editor b, .lt-editor strong{ font-weight:700; }
   .cell-editor u, .lt-editor u{ text-decoration:underline; }
 
@@ -502,7 +564,10 @@
 
 <div class="topbar">
   <button class="backBtn" id="backBtn" aria-label="戻る">‹</button>
-  <div class="title" id="titleEl">マンダラート</div>
+  <div class="title-stack">
+    <div class="title" id="titleEl">マンダラート</div>
+    <button type="button" class="time-now" id="timeNow"></button>
+  </div>
   <div class="menuWrap">
     <button class="menuBtn" id="menuBtn" aria-label="メニュー">⋯</button>
   </div>
@@ -551,6 +616,7 @@
       <div class="menu-section">
         <div class="menu-label">その他</div>
         <div class="menu-grid">
+        <button type="button" id="todayLogBtn">今日の記録</button>
         <button type="button" id="styleBtn">文字スタイル</button>
         </div>
       </div>
@@ -633,6 +699,7 @@
 (function(){
   const STORAGE_KEY = 'mandalart:state';
   const STYLE_KEY = 'mandalart:style';
+  const TIME_KEY = 'mandalart:time';
 
   const FONT_FAMILIES = {
     gothic: '"Zen Kaku Gothic New", -apple-system, BlinkMacSystemFont, sans-serif',
@@ -674,7 +741,7 @@
   // expanded into a child node (created lazily), which itself can be expanded further,
   // to any depth. The child's center cell always mirrors the parent's cell that opened it.
   function makeNode(){
-    return { cells: Array(9).fill(''), children: new Array(9).fill(null) };
+    return { cells: Array(9).fill(''), children: new Array(9).fill(null), timeIds: Array(9).fill(null), nodeId: null };
   }
   let root = makeNode();
   // navPath: [{node, idx}] from root (idx=null) down to the node currently on screen.
@@ -941,6 +1008,10 @@
     const tmpChild = node.children[i];
     node.children[i] = node.children[j];
     node.children[j] = tmpChild;
+    if (!node.timeIds) node.timeIds = Array(9).fill(null);
+    const tmpId = node.timeIds[i];
+    node.timeIds[i] = node.timeIds[j];
+    node.timeIds[j] = tmpId;
     syncMirror(i);
     syncMirror(j);
   }
@@ -1014,6 +1085,431 @@
     document.addEventListener('pointercancel', onDragCancel);
   }
 
+  let timeState = { running: [], logs: [] };
+
+  function loadTime(){
+    try{
+      const raw = localStorage.getItem(TIME_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== 'object') return;
+      if (Array.isArray(parsed.running)){
+        timeState.running = parsed.running.filter((run) => run && run.timeId && run.startMs);
+      } else if (parsed.running && parsed.running.timeId){
+        timeState.running = [parsed.running];
+      } else {
+        timeState.running = [];
+      }
+      timeState.logs = Array.isArray(parsed.logs) ? parsed.logs.filter((log) => log && log.timeId && log.startMs) : [];
+    }catch(e){}
+  }
+
+  function saveTime(){
+    try{ localStorage.setItem(TIME_KEY, JSON.stringify(timeState)); }catch(e){}
+  }
+
+  function todayKey(ms){
+    const d = new Date(ms);
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return d.getFullYear() + '-' + m + '-' + day;
+  }
+
+  function clock(ms){
+    const d = new Date(ms);
+    return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+  }
+
+  function daySpan(startMs, endMs){
+    const s = new Date(startMs);
+    const e = new Date(endMs);
+    const s0 = new Date(s.getFullYear(), s.getMonth(), s.getDate()).getTime();
+    const e0 = new Date(e.getFullYear(), e.getMonth(), e.getDate()).getTime();
+    return Math.max(0, Math.round((e0 - s0) / 86400000));
+  }
+
+  function clockSpan(startMs, endMs){
+    const start = new Date(startMs);
+    const end = new Date(endMs);
+    const sh = String(start.getHours()).padStart(2, '0');
+    const sm = String(start.getMinutes()).padStart(2, '0');
+    const hours = end.getHours() + daySpan(startMs, endMs) * 24;
+    const eh = String(hours).padStart(2, '0');
+    const em = String(end.getMinutes()).padStart(2, '0');
+    return sh + ':' + sm + ' - ' + eh + ':' + em;
+  }
+
+  function formatDur(sec){
+    sec = Math.max(0, Math.floor(sec));
+    const h = Math.floor(sec / 3600);
+    const m = Math.floor((sec % 3600) / 60);
+    const s = sec % 60;
+    if (h > 0) return h + ':' + String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
+    return m + ':' + String(s).padStart(2, '0');
+  }
+
+  function formatMinutes(sec){
+    sec = Math.max(0, Math.floor(sec));
+    if (sec < 60) return sec + '秒';
+    return Math.round(sec / 60) + '分';
+  }
+
+  function formatSpent(sec){
+    sec = Math.max(0, Math.floor(sec));
+    const h = Math.floor(sec / 3600);
+    const m = Math.floor((sec % 3600) / 60);
+    const s = sec % 60;
+    let out = '';
+    if (h) out += h + '時間';
+    if (m) out += m + '分';
+    if (s || !out) out += s + '秒';
+    return out;
+  }
+
+  function cellTimeId(node, c){
+    if (c === 4 && !atRoot() && node === currentNode()){
+      const parentEntry = navPath[navPath.length - 2];
+      const myIdx = navPath[navPath.length - 1].idx;
+      return (parentEntry.node.timeIds && parentEntry.node.timeIds[myIdx]) || '';
+    }
+    return (node.timeIds && node.timeIds[c]) || '';
+  }
+
+  function ensureTimeId(node, c){
+    if (c === 4 && !atRoot() && node === currentNode()){
+      const parentEntry = navPath[navPath.length - 2];
+      const myIdx = navPath[navPath.length - 1].idx;
+      return ensureTimeId(parentEntry.node, myIdx);
+    }
+    if (!node.timeIds) node.timeIds = Array(9).fill(null);
+    if (!node.timeIds[c]){
+      node.timeIds[c] = 'tc-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
+    }
+    return node.timeIds[c];
+  }
+
+  function runningList(){
+    return Array.isArray(timeState.running) ? timeState.running : [];
+  }
+
+  function isTimeRunning(timeId){
+    return !!(timeId && runningList().some((run) => run.timeId === timeId));
+  }
+
+  function ensureNodeId(node){
+    if (!node.nodeId){
+      node.nodeId = 'nd-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
+    }
+    return node.nodeId;
+  }
+
+  // same counting rule as the time written into the cell text
+  function todaySeconds(timeId, now){
+    return loggedSeconds(timeId, now);
+  }
+
+  function ringTreeSeconds(node, now){
+    if (!node) return 0;
+    let sec = 0;
+    RING_ORDER.forEach((idx) => {
+      const id = node.timeIds && node.timeIds[idx];
+      sec += todaySeconds(id, now);
+      const child = node.children && node.children[idx];
+      if (child) sec += ringTreeSeconds(child, now);
+    });
+    return sec;
+  }
+
+  function subtreeLive(node){
+    if (!node) return false;
+    return RING_ORDER.some((idx) => {
+      const id = node.timeIds && node.timeIds[idx];
+      if (isTimeRunning(id)) return true;
+      const child = node.children && node.children[idx];
+      return !!(child && subtreeLive(child));
+    });
+  }
+
+  function cellTotalSeconds(node, c, now){
+    const own = todaySeconds(cellTimeId(node, c), now);
+    if (c === 4) return own + ringTreeSeconds(node, now);
+    const child = node.children && node.children[c];
+    return own + (child ? ringTreeSeconds(child, now) : 0);
+  }
+
+  function cellTotalLive(node, c){
+    if (isTimeRunning(cellTimeId(node, c))) return true;
+    if (c === 4) return subtreeLive(node);
+    const child = node.children && node.children[c];
+    return !!(child && subtreeLive(child));
+  }
+
+  function timeButtonLabel(node, c){
+    const now = Date.now();
+    const total = cellTotalSeconds(node, c, now);
+    if (cellTotalLive(node, c)) return formatDur(total);
+    if (total > 0) return formatMinutes(total);
+    return '▶';
+  }
+
+  const TIME_PREFIX_RE = /^\d{1,3}:\d{2}\s*[-–—]\s*\d{1,3}:\d{2}(?:[ \t]+(?:\d+時間(?:\d+分)?(?:\d+秒)?|\d+分(?:\d+秒)?|\d+秒))?(?:[ \t]*\n|[ \t]+)?/;
+  const TIME_SUFFIX_RE = /(?:^|[ \t]+|\n)\d{1,3}:\d{2}\s*[-–—]\s*\d{1,3}:\d{2}(?:[ \t]+(?:\d+時間(?:\d+分)?(?:\d+秒)?|\d+分(?:\d+秒)?|\d+秒))?[ \t]*$/;
+  // older versions wrote the time before the text; both positions are stripped
+  function stripTimeStamp(text){
+    return String(text || '').replace(TIME_PREFIX_RE, '').replace(/^\n/, '').replace(TIME_SUFFIX_RE, '');
+  }
+
+  function logCountsForDay(log, today){
+    if (todayKey(log.startMs) === today) return true;
+    return !!(log.stopMs && todayKey(log.stopMs) === today);
+  }
+
+  function logsRange(timeId, today){
+    if (!timeId) return null;
+    const counted = timeState.logs.filter((log) => log.timeId === timeId && logCountsForDay(log, today));
+    if (!counted.length) return null;
+    let start = Infinity;
+    let end = -Infinity;
+    counted.forEach((log) => {
+      start = Math.min(start, log.startMs);
+      end = Math.max(end, log.stopMs);
+    });
+    const startDay = todayKey(start);
+    timeState.logs.forEach((log) => {
+      if (log.timeId !== timeId || !log.stopMs) return;
+      const began = todayKey(log.startMs);
+      const ended = todayKey(log.stopMs);
+      if (began !== startDay && ended !== startDay) return;
+      start = Math.min(start, log.startMs);
+      end = Math.max(end, log.stopMs);
+    });
+    return { start: start, end: end };
+  }
+
+  function boardChildrenRange(node, today){
+    let start = Infinity;
+    let end = -Infinity;
+    let any = false;
+    RING_ORDER.forEach((idx) => {
+      const range = cellRange(node, idx, today);
+      if (!range) return;
+      any = true;
+      start = Math.min(start, range.start);
+      end = Math.max(end, range.end);
+    });
+    return any ? { start: start, end: end } : null;
+  }
+
+  function mergeRange(a, b){
+    if (a && b) return { start: Math.min(a.start, b.start), end: Math.max(a.end, b.end) };
+    return a || b || null;
+  }
+
+  function cellRange(node, c, today){
+    const child = node.children && node.children[c];
+    const nested = child ? boardChildrenRange(child, today) : null;
+    const id = node.timeIds && node.timeIds[c];
+    return mergeRange(nested, logsRange(id, today));
+  }
+
+  function withTimePrefix(value, range, seconds){
+    const raw = cellText(value);
+    if (!range) return raw;
+    const text = stripTimeStamp(raw);
+    let stamp = clockSpan(range.start, range.end);
+    if (seconds > 0) stamp += ' ' + formatSpent(seconds);
+    return text ? text + ' ' + stamp : stamp;
+  }
+
+  function loggedSeconds(timeId, now){
+    if (!timeId) return 0;
+    const today = todayKey(now);
+    let sec = 0;
+    timeState.logs.forEach((log) => {
+      if (log.timeId === timeId && logCountsForDay(log, today)) sec += Number(log.durationSec) || 0;
+    });
+    runningList().forEach((run) => {
+      if (run.timeId !== timeId) return;
+      sec += Math.max(0, Math.floor((now - run.startMs) / 1000));
+    });
+    return sec;
+  }
+
+  function ringMeasuredSeconds(node, now){
+    if (!node) return 0;
+    let sec = 0;
+    RING_ORDER.forEach((idx) => {
+      const id = node.timeIds && node.timeIds[idx];
+      sec += loggedSeconds(id, now);
+      const child = node.children && node.children[idx];
+      if (child) sec += ringMeasuredSeconds(child, now);
+    });
+    return sec;
+  }
+
+  function cellRecordedSeconds(node, c, now){
+    const id = (node.timeIds && node.timeIds[c]) || '';
+    let sec = loggedSeconds(id, now);
+    if (c === 4) sec += ringMeasuredSeconds(node, now);
+    else if (node.children && node.children[c]) sec += ringMeasuredSeconds(node.children[c], now);
+    return sec;
+  }
+
+  function writeCellText(node, c, range, seconds){
+    const next = withTimePrefix(node.cells[c], range, seconds);
+    if (cellText(node.cells[c]) === next) return false;
+    node.cells[c] = next;
+    return true;
+  }
+
+  function refreshTimePrefixes(node){
+    if (!node) return false;
+    const now = Date.now();
+    const today = todayKey(now);
+    let changed = false;
+    RING_ORDER.forEach((idx) => {
+      if (node.children[idx] && refreshTimePrefixes(node.children[idx])) changed = true;
+    });
+    RING_ORDER.forEach((idx) => {
+      const range = cellRange(node, idx, today);
+      const sec = cellRecordedSeconds(node, idx, now);
+      if (writeCellText(node, idx, range, sec)) changed = true;
+      if (node.children[idx] && writeCellText(node.children[idx], 4, range, sec)) changed = true;
+    });
+    const centerSec = cellRecordedSeconds(node, 4, now);
+    const centerRange = mergeRange(boardChildrenRange(node, today), logsRange(node.timeIds && node.timeIds[4], today));
+    if (writeCellText(node, 4, centerRange, centerSec)) changed = true;
+    return changed;
+  }
+
+  function stopEntries(entries){
+    if (!entries || !entries.length) return;
+    const drop = new Set(entries);
+    const stopMs = Date.now();
+    let recorded = false;
+    entries.forEach((run) => {
+      const durationSec = Math.max(0, Math.floor((stopMs - run.startMs) / 1000));
+      if (durationSec >= 1){
+        recorded = true;
+        timeState.logs.push({
+          timeId: run.timeId,
+          title: run.title,
+          startMs: run.startMs,
+          stopMs: stopMs,
+          durationSec: durationSec
+        });
+      }
+    });
+    timeState.running = runningList().filter((run) => !drop.has(run));
+    saveTime();
+    if (recorded){
+      refreshTimePrefixes(root);
+      scheduleSave();
+    }
+  }
+
+  function boardTimeIds(node){
+    const ids = [];
+    for (let i = 0; i < 9; i++){
+      const id = cellTimeId(node, i);
+      if (id) ids.push(id);
+    }
+    return ids;
+  }
+
+  function treeTimeIds(node, out){
+    if (!node) return out;
+    RING_ORDER.forEach((idx) => {
+      const id = node.timeIds && node.timeIds[idx];
+      if (id) out.add(id);
+      if (node.children && node.children[idx]) treeTimeIds(node.children[idx], out);
+    });
+    return out;
+  }
+  // a cell's total includes everything below it, so timers above or below must not overlap
+  function nestedTimeIds(node, c){
+    const ids = new Set(boardTimeIds(node));
+    for (let k = 1; k < navPath.length; k++){
+      const parent = navPath[k - 1].node;
+      const id = parent.timeIds && parent.timeIds[navPath[k].idx];
+      if (id) ids.add(id);
+    }
+    treeTimeIds(c === 4 ? node : node.children[c], ids);
+    return ids;
+  }
+
+  // timing is offered on the top board and the boards opened from it
+  const MAX_TIMED_DEPTH = 3;
+  function timingAllowed(){
+    return navPath.length <= MAX_TIMED_DEPTH;
+  }
+
+  function toggleCellTimer(c){
+    if (!timingAllowed()) return;
+    const node = currentNode();
+    const nodeId = ensureNodeId(node);
+    const existing = cellTimeId(node, c);
+    if (existing && isTimeRunning(existing)){
+      stopEntries(runningList().filter((run) => run.timeId === existing));
+    } else {
+      const ids = nestedTimeIds(node, c);
+      stopEntries(runningList().filter((run) => run.nodeId === nodeId || ids.has(run.timeId)));
+      const id = ensureTimeId(node, c);
+      const title = stripTimeStamp(cellText(node.cells[c])).trim() || '（無題）';
+      timeState.running.push({ timeId: id, nodeId: nodeId, cellIndex: c, title: title, startMs: Date.now() });
+      saveTime();
+      scheduleSave();
+    }
+    render();
+    paintTimeNow();
+  }
+
+  function paintTimeNow(){
+    const el = document.getElementById('timeNow');
+    const runs = runningList();
+    const now = Date.now();
+    const node = currentNode();
+    if (el){
+      if (!runs.length){
+        el.classList.remove('show');
+        el.textContent = '';
+      } else {
+        el.classList.add('show');
+        el.textContent = runs.map((run) => {
+          return formatDur(Math.floor((now - run.startMs) / 1000)) + '  ' + (run.title || '（無題）');
+        }).join('  ·  ');
+      }
+    }
+    document.querySelectorAll('.time-btn').forEach((btn) => {
+      const c = Number(btn.dataset.c);
+      const label = timeButtonLabel(node, c);
+      btn.textContent = label;
+      btn.classList.toggle('is-play', label === '▶');
+      btn.classList.toggle('is-running', isTimeRunning(cellTimeId(node, c)));
+    });
+  }
+
+  function buildTodayLog(){
+    const now = Date.now();
+    const today = todayKey(now);
+    const lines = timeState.logs.filter((log) => todayKey(log.startMs) === today);
+    const runs = runningList().filter((run) => todayKey(run.startMs) === today);
+    let out = today + '\n\n';
+    if (!lines.length && !runs.length) return out + '今日の記録はまだありません。\n';
+    let total = 0;
+    lines.forEach((log) => {
+      total += Number(log.durationSec) || 0;
+      out += clock(log.startMs) + '–' + clock(log.stopMs) + '  ' + formatMinutes(log.durationSec) + '  ' + (log.title || '（無題）') + '\n';
+    });
+    runs.forEach((run) => {
+      const sec = Math.max(0, Math.floor((now - run.startMs) / 1000));
+      total += sec;
+      out += clock(run.startMs) + '–  ' + formatMinutes(sec) + '  ' + (run.title || '（無題）') + '（記録中）\n';
+    });
+    out += '\n合計 ' + formatMinutes(total) + '\n';
+    return out;
+  }
+
   function filledRingCount(child){
     if (!child) return 0;
     return [0, 1, 2, 3, 5, 6, 7, 8].filter((i) => cellDisplay(child.cells[i])).length;
@@ -1021,6 +1517,7 @@
 
   function render(){
     const leftSolo = document.body.classList.contains('solo-edit');
+    document.body.classList.toggle('no-timing', !timingAllowed());
     if (leftSolo){
       document.body.classList.remove('solo-edit');
       soloEditor = null;
@@ -1125,6 +1622,32 @@
         badge.className = 'ring-count';
         badge.textContent = String(filled);
         cellEl.appendChild(badge);
+      }
+      if (timingAllowed()){
+        const timeBtn = document.createElement('button');
+        timeBtn.type = 'button';
+        timeBtn.className = 'time-btn';
+        timeBtn.dataset.c = String(c);
+        const timeId = cellTimeId(node, c);
+        if (timeId) timeBtn.dataset.timeId = timeId;
+        const timeLabel = timeButtonLabel(node, c);
+        timeBtn.textContent = timeLabel;
+        if (timeLabel === '▶') timeBtn.classList.add('is-play');
+        if (c === 4){
+          if (isTimeRunning(cellTimeId(node, 4))) timeBtn.classList.add('is-running');
+        } else if (timeId && isTimeRunning(timeId)){
+          timeBtn.classList.add('is-running');
+        }
+        timeBtn.addEventListener('pointerdown', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+        });
+        timeBtn.addEventListener('pointerup', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          toggleCellTimer(c);
+        });
+        cellEl.appendChild(timeBtn);
       }
       boardEl.appendChild(cellEl);
       attachGestures(cellEl, ta, c);
@@ -1302,6 +1825,7 @@
     }
 
     cellEl.addEventListener('pointerdown', (e) => {
+      if (e.target.closest('.time-btn')) return;
       if (isEditing()) return;
       beginPress(e);
     });
@@ -1337,6 +1861,12 @@
         node.cells[i] = typeof raw.cells[i] === 'string' ? raw.cells[i] : '';
       }
     }
+    if (raw && Array.isArray(raw.timeIds)){
+      for (let i = 0; i < 9; i++){
+        node.timeIds[i] = typeof raw.timeIds[i] === 'string' && raw.timeIds[i] ? raw.timeIds[i] : null;
+      }
+    }
+    if (raw && typeof raw.nodeId === 'string' && raw.nodeId) node.nodeId = raw.nodeId;
     if (raw && Array.isArray(raw.children)){
       for (let i = 0; i < 9; i++){
         if (raw.children[i]) node.children[i] = normalizeNode(raw.children[i]);
@@ -2105,6 +2635,21 @@
   document.getElementById('fillSceneTemplateBtn').addEventListener('pointerup', () => {
     fillCurrentBoardTemplate(BOARD_TEMPLATES.scene);
   });
+  document.getElementById('todayLogBtn').addEventListener('pointerup', () => {
+    closeMenu();
+    const h2 = overlay.querySelector('h2');
+    if (h2) h2.textContent = '今日の記録';
+    exportArea.value = buildTodayLog();
+    overlay.classList.add('open');
+  });
+  document.getElementById('timeNow').addEventListener('pointerup', (e) => {
+    e.preventDefault();
+    const runs = runningList();
+    if (!runs.length) return;
+    stopEntries([runs[runs.length - 1]]);
+    render();
+    paintTimeNow();
+  });
 
   // ---- cut / paste a cell together with every level below it ----
   const CLIP_KEY = STORAGE_KEY + ':clip';
@@ -2464,8 +3009,15 @@
   }
 
   loadStyleSettings();
+  loadTime();
   loadData();
   const memoCell = applyMemoFromUrl();
+  if (refreshTimePrefixes(root)){
+    render();
+    scheduleSave();
+  }
+  paintTimeNow();
+  setInterval(paintTimeNow, 1000);
   updateFabTargetLabel();
   selectCell(memoCell === null ? 4 : memoCell);
   if (window.matchMedia('(hover: hover) and (pointer: fine)').matches){
