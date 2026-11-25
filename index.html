@@ -2976,7 +2976,6 @@
     setTimeout(() => el.remove(), 4500);
   }
   function applyMemoFromUrl(){
-    const rawSearch = location.search;
     const params = new URLSearchParams(location.search);
     const memo = (params.get('memo') || params.get('add') || '').trim();
     if (!params.has('memo') && !params.has('add')) return null;
@@ -2984,10 +2983,7 @@
     params.delete('add');
     const rest = params.toString();
     history.replaceState(null, '', location.pathname + (rest ? '?' + rest : '') + location.hash);
-    if (!memo){
-      showMemoNotice('メモが空でした\n受け取ったURL: ' + decodeURIComponentSafe(rawSearch));
-      return null;
-    }
+    if (!memo) return null;
 
     const now = tokyoNow();
     ensureDayLayout(now.dateLabel);
@@ -3007,9 +3003,6 @@
     saveData();
     showMemoNotice('記入しました: ' + memo);
     return slot.idx;
-  }
-  function decodeURIComponentSafe(text){
-    try{ return decodeURIComponent(text); }catch(e){ return text; }
   }
 
   loadStyleSettings();
