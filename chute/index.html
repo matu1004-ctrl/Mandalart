@@ -327,6 +327,8 @@
     pointer-events:none;
   }
   .cell-editor{ padding-bottom:calc(var(--cell-font-size) * 2.4 + 8px); }
+  body.no-timing .cell-editor{ padding-bottom:6px; }
+  body.no-timing.solo-edit .cell.editing .cell-editor{ padding-bottom:18px; }
   body.solo-edit .bottom-dock{ display:none; }
   body.solo-edit .board{
     display:block;
@@ -1437,7 +1439,14 @@
     return ids;
   }
 
+  // timing is offered on the top board and the boards opened from it
+  const MAX_TIMED_DEPTH = 2;
+  function timingAllowed(){
+    return navPath.length <= MAX_TIMED_DEPTH;
+  }
+
   function toggleCellTimer(c){
+    if (!timingAllowed()) return;
     const node = currentNode();
     const nodeId = ensureNodeId(node);
     const existing = cellTimeId(node, c);
@@ -1509,6 +1518,7 @@
 
   function render(){
     const leftSolo = document.body.classList.contains('solo-edit');
+    document.body.classList.toggle('no-timing', !timingAllowed());
     if (leftSolo){
       document.body.classList.remove('solo-edit');
       soloEditor = null;
@@ -1614,30 +1624,32 @@
         badge.textContent = String(filled);
         cellEl.appendChild(badge);
       }
-      const timeBtn = document.createElement('button');
-      timeBtn.type = 'button';
-      timeBtn.className = 'time-btn';
-      timeBtn.dataset.c = String(c);
-      const timeId = cellTimeId(node, c);
-      if (timeId) timeBtn.dataset.timeId = timeId;
-      const timeLabel = timeButtonLabel(node, c);
-      timeBtn.textContent = timeLabel;
-      if (timeLabel === '▶') timeBtn.classList.add('is-play');
-      if (c === 4){
-        if (isTimeRunning(cellTimeId(node, 4))) timeBtn.classList.add('is-running');
-      } else if (timeId && isTimeRunning(timeId)){
-        timeBtn.classList.add('is-running');
+      if (timingAllowed()){
+        const timeBtn = document.createElement('button');
+        timeBtn.type = 'button';
+        timeBtn.className = 'time-btn';
+        timeBtn.dataset.c = String(c);
+        const timeId = cellTimeId(node, c);
+        if (timeId) timeBtn.dataset.timeId = timeId;
+        const timeLabel = timeButtonLabel(node, c);
+        timeBtn.textContent = timeLabel;
+        if (timeLabel === '▶') timeBtn.classList.add('is-play');
+        if (c === 4){
+          if (isTimeRunning(cellTimeId(node, 4))) timeBtn.classList.add('is-running');
+        } else if (timeId && isTimeRunning(timeId)){
+          timeBtn.classList.add('is-running');
+        }
+        timeBtn.addEventListener('pointerdown', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+        });
+        timeBtn.addEventListener('pointerup', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          toggleCellTimer(c);
+        });
+        cellEl.appendChild(timeBtn);
       }
-      timeBtn.addEventListener('pointerdown', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-      });
-      timeBtn.addEventListener('pointerup', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        toggleCellTimer(c);
-      });
-      cellEl.appendChild(timeBtn);
       boardEl.appendChild(cellEl);
       attachGestures(cellEl, ta, c);
     }
