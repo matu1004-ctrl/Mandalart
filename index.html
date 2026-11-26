@@ -3006,6 +3006,17 @@
     const slot = nextMemoSlot(memoChild(hour.node, hour.idx), hourPath);
     if (slot.prev) closeMemo(slot.prev, now.time);
     slot.node.cells[slot.idx] = textToCellHtml(`${memo} ${now.time}〜`);
+    stopEntries(runningList().slice());
+    if (slot.path.length + 1 <= MAX_TIMED_DEPTH){
+      timeState.running.push({
+        timeId: ensureTimeId(slot.node, slot.idx),
+        nodeId: ensureNodeId(slot.node),
+        cellIndex: slot.idx,
+        title: memo,
+        startMs: Date.now(),
+      });
+      saveTime();
+    }
 
     navPath = [{ node: root, idx: null }];
     let node = root;
