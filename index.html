@@ -2926,10 +2926,13 @@
     }
   }
   // fills MEMO_ORDER, then turns the bottom-right cell into "続" and continues one level down
+  // prev is the filled slot just before the returned one in the same chain
   function nextMemoSlot(node, path){
+    let prev = null;
     for (;;){
       for (const i of MEMO_ORDER){
-        if (!cellDisplay(node.cells[i])) return { node, idx: i, path };
+        if (!cellDisplay(node.cells[i])) return { node, idx: i, path, prev };
+        prev = { node, idx: i };
       }
       if (!cellDisplay(node.cells[MEMO_MORE_CELL])) node.cells[MEMO_MORE_CELL] = MEMO_MORE_LABEL;
       path = path.concat(MEMO_MORE_CELL);
@@ -2975,6 +2978,17 @@
     setTimeout(() => { el.style.opacity = '0'; }, 4000);
     setTimeout(() => el.remove(), 4500);
   }
+  // memo times use 〜 so they stay apart from the timer's "H:MM - H:MM" stamp
+  function closeMemo(slot, endTime){
+    const html = String(slot.node.cells[slot.idx] || '');
+    const open = html.match(/(\d{1,2}:\d{2})〜\s*$/);
+    if (open){
+      slot.node.cells[slot.idx] = html.replace(/\s*$/, '') + endTime;
+      return;
+    }
+    const single = html.match(/ (\d{1,2}:\d{2})\s*$/);
+    if (single) slot.node.cells[slot.idx] = html.replace(/ (\d{1,2}:\d{2})\s*$/, ` $1〜${endTime}`);
+  }
   function applyMemoFromUrl(){
     const params = new URLSearchParams(location.search);
     const memo = (params.get('memo') || params.get('add') || '').trim();
@@ -2990,7 +3004,8 @@
     const hour = hourSlot(now.hour);
     const hourPath = hour.path.concat(hour.idx);
     const slot = nextMemoSlot(memoChild(hour.node, hour.idx), hourPath);
-    slot.node.cells[slot.idx] = textToCellHtml(`${memo} ${now.time}`);
+    if (slot.prev) closeMemo(slot.prev, now.time);
+    slot.node.cells[slot.idx] = textToCellHtml(`${memo} ${now.time}〜`);
 
     navPath = [{ node: root, idx: null }];
     let node = root;
