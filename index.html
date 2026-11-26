@@ -3005,9 +3005,11 @@
     const hourPath = hour.path.concat(hour.idx);
     const slot = nextMemoSlot(memoChild(hour.node, hour.idx), hourPath);
     if (slot.prev) closeMemo(slot.prev, now.time);
-    slot.node.cells[slot.idx] = textToCellHtml(`${memo} ${now.time}〜`);
+    const timed = slot.path.length + 1 <= MAX_TIMED_DEPTH;
+    // untimed memos keep "H:MM〜" because no timer stamp will record them
+    slot.node.cells[slot.idx] = textToCellHtml(timed ? memo : `${memo} ${now.time}〜`);
     stopEntries(runningList().slice());
-    if (slot.path.length + 1 <= MAX_TIMED_DEPTH){
+    if (timed){
       timeState.running.push({
         timeId: ensureTimeId(slot.node, slot.idx),
         nodeId: ensureNodeId(slot.node),
