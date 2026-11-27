@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="マンダラート時間">
-<title>マンダラート時間</title>
+<meta name="apple-mobile-web-app-title" content="マンダラート">
+<title>マンダラート</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Shippori+Mincho:wght@600;700&family=Zen+Kaku+Gothic+New:wght@400;500;700&display=swap" rel="stylesheet">
@@ -560,13 +560,12 @@
   .paste-hint{ font-size:12px; color:var(--ink-soft); line-height:1.45; margin:0; }
 </style>
 </head>
-<body>
+<body class="no-timing">
 
 <div class="topbar">
   <button class="backBtn" id="backBtn" aria-label="戻る">‹</button>
   <div class="title-stack">
-    <div class="title" id="titleEl">マンダラート時間</div>
-    <button type="button" class="time-now" id="timeNow"></button>
+    <div class="title" id="titleEl">マンダラート</div>
   </div>
   <div class="menuWrap">
     <button class="menuBtn" id="menuBtn" aria-label="メニュー">⋯</button>
@@ -616,7 +615,6 @@
       <div class="menu-section">
         <div class="menu-label">その他</div>
         <div class="menu-grid">
-        <button type="button" id="todayLogBtn">今日の記録</button>
         <button type="button" id="styleBtn">文字スタイル</button>
         </div>
       </div>
@@ -1089,20 +1087,8 @@
   let timeState = { running: [], logs: [] };
 
   function loadTime(){
-    try{
-      const raw = localStorage.getItem(TIME_KEY);
-      if (!raw) return;
-      const parsed = JSON.parse(raw);
-      if (!parsed || typeof parsed !== 'object') return;
-      if (Array.isArray(parsed.running)){
-        timeState.running = parsed.running.filter((run) => run && run.timeId && run.startMs);
-      } else if (parsed.running && parsed.running.timeId){
-        timeState.running = [parsed.running];
-      } else {
-        timeState.running = [];
-      }
-      timeState.logs = Array.isArray(parsed.logs) ? parsed.logs.filter((log) => log && log.timeId && log.startMs) : [];
-    }catch(e){}
+    timeState = { running: [], logs: [] };
+    try{ localStorage.removeItem(TIME_KEY); }catch(e){}
   }
 
   function saveTime(){
@@ -1364,6 +1350,7 @@
   }
 
   function refreshTimePrefixes(node){
+    return false;
     if (!node) return false;
     const now = Date.now();
     const today = todayKey(now);
@@ -1442,7 +1429,7 @@
   // timing is offered on the top board and the boards opened from it
   const MAX_TIMED_DEPTH = 2;
   function timingAllowed(){
-    return navPath.length <= MAX_TIMED_DEPTH;
+    return false;
   }
 
   function toggleCellTimer(c){
@@ -1875,6 +1862,21 @@
     }
     return node;
   }
+  function stripTimeFromTree(node){
+    if (!node || !node.cells) return false;
+    let changed = false;
+    for (let i = 0; i < 9; i++){
+      const text = cellText(node.cells[i]);
+      const stripped = stripTimeStamp(text).replace(/[ \t]+$/g, '').replace(/\n+$/g, '');
+      if (stripped !== text){
+        node.cells[i] = stripped ? textToCellHtml(stripped) : '';
+        changed = true;
+      }
+      if (node.children[i] && stripTimeFromTree(node.children[i])) changed = true;
+    }
+    return changed;
+  }
+
   function loadData(){
     try{
       const raw = localStorage.getItem(STORAGE_KEY) || localStorage.getItem(SOURCE_KEY);
@@ -1909,6 +1911,7 @@
         }
       }
     }catch(err){ /* fresh start */ }
+    if (stripTimeFromTree(root)) saveData();
     render();
   }
 
@@ -2636,21 +2639,6 @@
   document.getElementById('fillSceneTemplateBtn').addEventListener('pointerup', () => {
     fillCurrentBoardTemplate(BOARD_TEMPLATES.scene);
   });
-  document.getElementById('todayLogBtn').addEventListener('pointerup', () => {
-    closeMenu();
-    const h2 = overlay.querySelector('h2');
-    if (h2) h2.textContent = '今日の記録';
-    exportArea.value = buildTodayLog();
-    overlay.classList.add('open');
-  });
-  document.getElementById('timeNow').addEventListener('pointerup', (e) => {
-    e.preventDefault();
-    const runs = runningList();
-    if (!runs.length) return;
-    stopEntries([runs[runs.length - 1]]);
-    render();
-    paintTimeNow();
-  });
 
   // ---- cut / paste a cell together with every level below it ----
   const CLIP_KEY = STORAGE_KEY + ':clip';
@@ -2991,7 +2979,7 @@
     const hour = hourSlot(now.hour);
     const hourPath = hour.path.concat(hour.idx);
     const slot = nextMemoSlot(memoChild(hour.node, hour.idx), hourPath);
-    slot.node.cells[slot.idx] = textToCellHtml(`${memo} ${now.time}`);
+    slot.node.cells[slot.idx] = textToCellHtml(memo);
 
     navPath = [{ node: root, idx: null }];
     let node = root;
@@ -3014,8 +3002,6 @@
     render();
     scheduleSave();
   }
-  paintTimeNow();
-  setInterval(paintTimeNow, 1000);
   updateFabTargetLabel();
   selectCell(memoCell === null ? 4 : memoCell);
   if (window.matchMedia('(hover: hover) and (pointer: fine)').matches){
