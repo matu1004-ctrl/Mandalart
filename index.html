@@ -2952,8 +2952,9 @@
   function hourSlot(hour){
     for (let i = 0; i < 9; i++){
       if (i === 4) continue;
-      const label = memoLabel(root.cells[i]).normalize('NFKC').replace(/\s+/g, '');
-      const m = label.match(/^(\d{1,2})時?[-‐‑‒–—―ー−~〜～]+(\d{1,2})時?$/);
+      // the range may be followed by plans, e.g. "15-17 コストコ"
+      const label = memoLabel(root.cells[i]).normalize('NFKC').trim();
+      const m = label.match(/^(\d{1,2})\s*時?\s*[-‐‑‒–—―ー−~〜～]+\s*(\d{1,2})(?!\d|:)/);
       if (!m) continue;
       const from = Number(m[1]), to = Number(m[2]);
       const inRange = from <= to ? (from <= hour && hour <= to) : (hour >= from || hour <= to);
