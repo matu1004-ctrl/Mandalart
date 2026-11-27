@@ -2990,6 +2990,14 @@
     const single = html.match(/ (\d{1,2}:\d{2})\s*$/);
     if (single) slot.node.cells[slot.idx] = html.replace(/ (\d{1,2}:\d{2})\s*$/, ` $1〜${endTime}`);
   }
+  // an open memo may sit in an earlier hour frame, so the whole tree is searched
+  function closeOpenMemos(node, endTime){
+    if (!node) return;
+    for (let i = 0; i < 9; i++){
+      if (i !== 4 && /\d{1,2}:\d{2}〜\s*$/.test(String(node.cells[i] || ''))) closeMemo({ node, idx: i }, endTime);
+      closeOpenMemos(node.children[i], endTime);
+    }
+  }
   function applyMemoFromUrl(){
     const params = new URLSearchParams(location.search);
     const memo = (params.get('memo') || params.get('add') || '').trim();
@@ -3006,6 +3014,7 @@
     const hourPath = hour.path.concat(hour.idx);
     const slot = nextMemoSlot(memoChild(hour.node, hour.idx), hourPath);
     if (slot.prev) closeMemo(slot.prev, now.time);
+    closeOpenMemos(root, now.time);
     const timed = slot.path.length + 1 <= MAX_TIMED_DEPTH;
     // untimed memos keep "H:MM〜" because no timer stamp will record them
     slot.node.cells[slot.idx] = textToCellHtml(timed ? memo : `${memo} ${now.time}〜`);
