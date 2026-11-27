@@ -330,9 +330,32 @@
   body.no-timing .cell-editor{ padding-bottom:6px; }
   body.no-timing.solo-edit .cell.editing .cell-editor{ padding-bottom:18px; }
   body.solo-edit .bottom-dock{ display:none; }
+  body.solo-edit .stage{
+    flex-direction:column;
+    align-items:stretch;
+    justify-content:flex-start;
+  }
   body.solo-edit .board{
     display:block;
     aspect-ratio:auto;
+  }
+  .solo-back{ display:none; }
+  body.solo-edit .solo-back{
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    flex:0 0 auto;
+    margin-top:10px;
+    min-height:48px;
+    padding:0 16px calc(8px + env(safe-area-inset-bottom));
+    border:0;
+    border-radius:12px;
+    background:#2b2b28;
+    color:#fff;
+    font-family:inherit;
+    font-size:16px;
+    font-weight:600;
+    cursor:pointer;
   }
   body.solo-edit .cell{
     position:absolute;
@@ -574,6 +597,7 @@
 
 <div class="stage">
   <div class="board" id="board"></div>
+  <button type="button" class="solo-back" id="soloBackBtn">9セルに戻る</button>
   <div class="longtext" id="longtext">
     <div class="lt-label" id="ltLabel"></div>
     <div class="lt-editor" id="ltArea" contenteditable="true" data-placeholder="ここに自由に書けます"></div>
@@ -2055,7 +2079,7 @@
   document.addEventListener('pointerdown', (e) => {
     if (e.target.closest && e.target.closest('.cell')) phoneEditArmed = true;
     if (!document.body.classList.contains('solo-edit')) return;
-    if (e.target.closest && e.target.closest('.cell, .fmt-bar')) return;
+    if (e.target.closest && e.target.closest('.cell, .fmt-bar, .solo-back')) return;
     soloHold = false;
     const active = document.activeElement;
     leaveSolo();
@@ -2067,6 +2091,13 @@
   }
   window.addEventListener('resize', syncFabToViewport);
   syncFabToViewport();
+  document.getElementById('soloBackBtn').addEventListener('pointerup', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const active = document.activeElement;
+    leaveSolo();
+    if (active && active.blur) active.blur();
+  });
   // prevent accidental close from the same gesture that opens items
   menu.addEventListener('pointerup', (e) => e.stopPropagation());
 
@@ -3016,9 +3047,11 @@
     const availW = stage.clientWidth - padX;
     const availH = stage.clientHeight - padY;
     if (document.body.classList.contains('solo-edit')){
+      const back = document.getElementById('soloBackBtn');
+      const backH = back ? back.offsetHeight + 10 : 0;
       boardEl.style.aspectRatio = 'auto';
       boardEl.style.width = Math.max(0, availW) + 'px';
-      boardEl.style.height = Math.max(0, availH) + 'px';
+      boardEl.style.height = Math.max(0, availH - backH) + 'px';
       return;
     }
     boardEl.style.aspectRatio = '';
